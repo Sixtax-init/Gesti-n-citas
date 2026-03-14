@@ -1,0 +1,109 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  password   String
+  name       String
+  role       String   // "alumno", "especialista", "admin"
+  matricula  String?
+  carrera    String?
+  semestre   Int?
+  edad       Int?
+  genero     String?
+  department String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  specialist Specialist?
+  studentAppointments Appointment[] @relation("StudentAppointments")
+  notifications       Notification[]
+}
+
+model Specialist {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  department String
+  email      String
+  active     Boolean  @default(true)
+  
+  schedules    ScheduleSlot[]
+  appointments Appointment[] @relation("SpecialistAppointments")
+}
+
+model ScheduleSlot {
+  id           String     @id @default(uuid())
+  specialistId String
+  specialist   Specialist @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+  dayOfWeek    Int
+  startTime    String
+  endTime      String
+  available    Boolean    @default(true)
+  week         Int?       // 0: current, 1: next, null: both
+}
+
+model Appointment {
+  id             String     @id @default(uuid())
+  studentId      String
+  student        User       @relation("StudentAppointments", fields: [studentId], references: [id], onDelete: Cascade)
+  studentName    String
+  specialistId   String
+  specialist     Specialist @relation("SpecialistAppointments", fields: [specialistId], references: [id], onDelete: Cascade)
+  specialistName String
+  department     String
+  date           String
+  time           String
+  status         String     @default("Pendiente")
+  modality       String
+  motivo         String
+  notes          String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+}
+
+model AppEvent {
+  id              String   @id @default(uuid())
+  title           String
+  description     String
+  department      String
+  date            String
+  time            String
+  type            String
+  imageUrl        String?
+  registrationUrl String?
+  createdAt       DateTime @default(now())
+}
+
+model Resource {
+  id          String   @id @default(uuid())
+  department  String
+  type        String
+  title       String
+  description String
+  url         String
+  imageUrl    String?
+  fileUrl     String?
+  fileName    String?
+  createdAt   DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  time      String
+  read      Boolean  @default(false)
+  type      String
+  createdAt DateTime @default(now())
+}
