@@ -1,0 +1,9 @@
+project_final/node_modules/
+project_final/dist/
+project_final/.env
+project_final/*.log
+
+node_modules/
+dist/
+.env
+*.log
