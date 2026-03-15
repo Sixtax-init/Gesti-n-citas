@@ -3,6 +3,8 @@ import { prisma } from '../db';
 
 const router = Router();
 
+import { upload } from '../middleware/upload';
+
 // GET /api/events
 router.get('/', async (req, res) => {
   try {
@@ -22,16 +24,31 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/events
-router.post('/', async (req, res) => {
+router.post('/', upload.single('image'), async (req, res) => {
   try {
-    const { title, description, department, date, time, type, imageUrl, registrationUrl } = req.body;
+    const { title, description, department, date, time, type, registrationUrl } = req.body;
+    let imageUrl = req.body.imageUrl;
 
     if (!title || !date || !department) {
       return res.status(400).json({ error: 'title, date y department son requeridos' });
     }
 
+    // Si se subió una imagen vía multer
+    if (req.file) {
+      imageUrl = `/uploads/${req.file.filename}`;
+    }
+
     const event = await prisma.appEvent.create({
-      data: { title, description: description || '', department, date, time: time || '', type: type || 'conferencia', imageUrl, registrationUrl }
+      data: { 
+        title, 
+        description: description || '', 
+        department, 
+        date, 
+        time: time || '', 
+        type: type || 'conferencia', 
+        imageUrl: imageUrl || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80', 
+        registrationUrl 
+      }
     });
 
     res.status(201).json(event);

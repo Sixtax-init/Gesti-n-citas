@@ -11,6 +11,7 @@ server/.env
 server/prisma/*.db
 server/prisma/*.db-journal
 server/*.log
+server/uploads/
 
 node_modules/
 dist/
@@ -19,3 +20,4 @@ dist/
 *.db-journal
 *.log
 *.txt
+uploads/

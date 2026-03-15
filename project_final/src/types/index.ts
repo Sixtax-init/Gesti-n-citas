@@ -7,6 +7,7 @@ export interface ScheduleSlot {
   endTime: string;
   available: boolean;
   week?: number; // 0: current, 1: next, undefined: both
+  specificDate?: string;
 }
 
 export interface User {
@@ -111,10 +112,18 @@ export interface StoreContextType {
   addScheduleSlot: (specialistId: string, slot: Omit<ScheduleSlot, "id">) => void;
   removeScheduleSlot: (specialistId: string, slotId: string) => void;
   events: AppEvent[];
-  addEvent: (ev: Omit<AppEvent, "id">) => void;
+  addEvent: (ev: Omit<AppEvent, "id">, file?: File) => Promise<void>;
   resources: Resource[];
-  addResource: (r: Omit<Resource, "id">) => void;
-  getStats: () => { total: number; pendientes: number; confirmadas: number; completadas: number; canceladas: number; byDept: Record<string, number> };
+  addResource: (r: Omit<Resource, "id">, file?: File) => Promise<void>;
+  getStats: () => { 
+    summary: { total: number; pendientes: number; confirmadas: number; completadas: number; canceladas: number; byDept: Record<string, number> };
+    charts: {
+      monthly: any[];
+      motivos: any[];
+      modalidad: any[];
+      carrera: any[];
+    }
+  };
   notifications: Record<string, AppNotification[]>;
   addNotification: (userId: string, notif: Omit<AppNotification, "id" | "time" | "read">) => void;
   markNotificationsRead: (userId: string) => void;

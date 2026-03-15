@@ -50,6 +50,7 @@ model ScheduleSlot {
   endTime      String
   available    Boolean    @default(true)
   week         Int?       // 0: current, 1: next, null: both
+  specificDate String?    // YYYY-MM-DD para disponibilidad en fecha única
 }
 
 model Appointment {

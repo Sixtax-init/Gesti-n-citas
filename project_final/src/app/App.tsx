@@ -12,6 +12,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from "recharts";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 import {
   User, Specialist, Appointment, AppEvent, Resource, AppNotification,
@@ -27,6 +29,8 @@ import {
 } from "../data/mockData";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
+
+const API_BASE = 'http://localhost:3000';
 
 function NotifIcon({ type }: { type: string }) {
   const props = { className: "w-4 h-4" };
@@ -722,7 +726,7 @@ function StudentDashboard() {
 
   const appointments = getAppointments({ studentId: user?.id });
   const proximas = appointments.filter(a => a.status === "Pendiente" || a.status === "Confirmada");
-  const { pendientes, confirmadas, completadas } = getStats();
+  const { summary: { pendientes, confirmadas, completadas } } = getStats();
   const historial = appointments.filter(a => a.status === "Completada" || a.status === "Cancelada");
 
   const stats = [
@@ -1476,6 +1480,7 @@ function SpecialistDashboard() {
   const [newWeek, setNewWeek] = useState<number | string>("both");
   const [newStart, setNewStart] = useState("09:00");
   const [newEnd, setNewEnd] = useState("13:00");
+  const [selectedBaseDate, setSelectedBaseDate] = useState<string | undefined>(undefined);
 
   const openEditSlot = (slot: any) => {
     setEditingSlotId(slot.id);
@@ -1483,15 +1488,17 @@ function SpecialistDashboard() {
     setNewWeek(slot.week === null || slot.week === undefined ? "both" : slot.week);
     setNewStart(slot.startTime);
     setNewEnd(slot.endTime);
+    setSelectedBaseDate(slot.specificDate || undefined);
     setShowAddSched(true);
   };
 
-  const handleOpenAddSlot = (day: number, week: number) => {
+  const handleOpenAddSlot = (day: number, week: number, dateStr: string) => {
     setEditingSlotId(null);
     setNewDay(day);
-    setNewWeek(week);
+    setNewWeek("date"); // Nueva opción para "Solo este día"
     setNewStart("09:00");
     setNewEnd("13:00");
+    setSelectedBaseDate(dateStr);
     setShowAddSched(true);
   };
 
@@ -1507,7 +1514,8 @@ function SpecialistDashboard() {
     if (!spec) return;
 
     const dayInt = parseInt(String(newDay));
-    const weekVal = newWeek === "both" ? undefined : parseInt(String(newWeek));
+    const isSpecificDate = newWeek === "date";
+    const weekVal = (newWeek === "both" || newWeek === "date") ? undefined : parseInt(String(newWeek));
 
     // Validar solapamiento
     const hasOverlap = spec.schedule.some(s => {
@@ -1518,9 +1526,10 @@ function SpecialistDashboard() {
       // Prisma returns null if field is not set, while frontend uses undefined or 'both'
       const sWeek = s.week === null ? undefined : s.week;
       const weekConflict = sWeek === undefined || weekVal === undefined || sWeek === weekVal;
+      const dateConflict = isSpecificDate ? s.specificDate === selectedBaseDate : (s.specificDate === null || s.specificDate === undefined);
       const timeOverlap = newStart < s.endTime && newEnd > s.startTime;
 
-      return sameDay && weekConflict && timeOverlap;
+      return sameDay && weekConflict && dateConflict && timeOverlap;
     });
 
     if (hasOverlap) {
@@ -1537,7 +1546,8 @@ function SpecialistDashboard() {
       startTime: newStart,
       endTime: newEnd,
       available: true,
-      week: weekVal
+      week: weekVal,
+      specificDate: isSpecificDate ? selectedBaseDate : undefined
     });
     setShowAddSched(false);
     setEditingSlotId(null);
@@ -1781,9 +1791,10 @@ function SpecialistDashboard() {
 
               {[0, 1].map(weekOffset => {
                 const today = new Date();
-                const currentDay = today.getDay() === 0 ? 7 : today.getDay();
+                // Si es domingo (0), el lunes actual es mañana. Si no, calcular el lunes de esta semana.
+                const dayShift = today.getDay() === 0 ? 1 : 1 - today.getDay();
                 const mondayOfCurrentWeek = new Date(today);
-                mondayOfCurrentWeek.setDate(today.getDate() - (currentDay - 1) + (weekOffset * 7));
+                mondayOfCurrentWeek.setDate(today.getDate() + dayShift + (weekOffset * 7));
 
                 return (
                   <div key={weekOffset} className={weekOffset === 1 ? "mt-8" : ""}>
@@ -1797,16 +1808,20 @@ function SpecialistDashboard() {
                     <div className="flex overflow-x-auto md:grid md:grid-cols-5 gap-3 sm:gap-4 pb-4 md:pb-0 scroll-smooth no-scrollbar snap-x">
                       {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"].map((day, i) => {
                         const dow = i + 1;
-                        const daySlots = spec.schedule.filter(s => s.dayOfWeek === dow && (s.week === undefined || s.week === weekOffset));
                         const dateObj = new Date(mondayOfCurrentWeek);
                         dateObj.setDate(mondayOfCurrentWeek.getDate() + i);
+                        const isoDate = dateObj.toISOString().split("T")[0];
+                        const daySlots = spec.schedule.filter(s => 
+                          (s.specificDate === isoDate) || 
+                          (s.specificDate === null && s.dayOfWeek === dow && (s.week === undefined || s.week === null || s.week === weekOffset))
+                        );
                         const dateStr = `${dateObj.getDate()} ${dateObj.toLocaleDateString("es-MX", { month: "short" })}`.replace(".", "");
                         const isPast = dateObj < new Date(new Date().setHours(0, 0, 0, 0));
 
                         return (
                           <div 
                             key={`${weekOffset}-${day}`} 
-                            onClick={() => !isPast && handleOpenAddSlot(dow, weekOffset)}
+                            onClick={() => !isPast && handleOpenAddSlot(dow, weekOffset, isoDate)}
                             className={`bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 min-h-[140px] sm:min-h-[160px] shadow-sm flex-shrink-0 w-[210px] sm:w-[240px] md:w-auto snap-start transition-all ${isPast ? "opacity-40" : "cursor-pointer hover:border-blue-400 hover:ring-4 hover:ring-blue-400/5 hover:bg-white"}`}
                           >
                             <div className="flex flex-col mb-3 sm:mb-4">
@@ -1859,9 +1874,10 @@ function SpecialistDashboard() {
                       <div>
                         <label className="block mb-2 text-slate-900 font-bold text-sm">Semana</label>
                         <select value={newWeek} onChange={e => setNewWeek(e.target.value)} className={inputCls}>
-                          <option value="both">Ambas Semanas</option>
-                          <option value="0">Semana Actual</option>
-                          <option value="1">Próxima Semana</option>
+                          <option value="date">Solo este día ({selectedBaseDate})</option>
+                          <option value="both">Recursivo: Ambas Semanas</option>
+                          <option value="0">Recursivo: Semana Actual</option>
+                          <option value="1">Recursivo: Próxima Semana</option>
                         </select>
                       </div>
                     </div>
@@ -2084,7 +2100,10 @@ function AdminDashboard() {
   // New content (Resource)
   const [ctitle, setCtitle] = useState(""), [cdesc, setCdesc] = useState(""), [ctype, setCtype] = useState("video"), [curl, setCurl] = useState(""), [cimgUrl, setCimgUrl] = useState(""), [cdept, setCdept] = useState("Psicología");
 
-  const stats = getStats();
+  const fullStats = getStats();
+  const summary = fullStats.summary;
+  const charts = fullStats.charts;
+
   const allAppts = getAppointments();
   const filteredAppts = allAppts.filter(a => {
     if (deptFilter !== "Todos" && a.department !== deptFilter) return false;
@@ -2140,9 +2159,9 @@ function AdminDashboard() {
       date: evDate,
       time: evTime,
       type: evType,
-      imageUrl: finalImg,
+      imageUrl: evImg || undefined,
       registrationUrl: evType === "taller" ? evRegUrl : undefined
-    });
+    }, selectedEventImg || undefined);
 
     toast.success("Evento publicado exitosamente");
     setEvTitle(""); setEvDesc(""); setEvDate(""); setEvTime(""); setEvImg(""); setEvRegUrl(""); setSelectedEventImg(null);
@@ -2164,13 +2183,86 @@ function AdminDashboard() {
       type: ctype,
       url: curl || "#",
       imageUrl: cimgUrl || undefined,
-      department: cdept,
-      fileUrl: finalFileUrl,
-      fileName: selectedFile?.name
-    });
+      department: cdept
+    }, selectedFile || undefined);
 
     toast.success("Material educativo publicado");
     setCtitle(""); setCdesc(""); setCurl(""); setCimgUrl(""); setSelectedFile(null);
+  };
+
+  const generatePDFReport = (deptReport: string) => {
+    const doc = new jsPDF();
+    const today = new Date().toLocaleDateString("es-MX");
+    
+    // Header
+    doc.setFontSize(22);
+    doc.setTextColor(30, 41, 59);
+    doc.text("Sistema de Gestión de Citas", 105, 20, { align: "center" });
+    doc.setFontSize(14);
+    doc.text(`Reporte Institucional: ${deptReport}`, 105, 30, { align: "center" });
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Fecha de generación: ${today}`, 105, 38, { align: "center" });
+    
+    // Line separator
+    doc.setDrawColor(226, 232, 240);
+    doc.line(20, 45, 190, 45);
+
+    // Filtering data
+    const list = deptReport === "Reporte Global" 
+      ? allAppts 
+      : allAppts.filter(a => a.department === deptReport);
+
+    const stats = {
+      total: list.length,
+      confirmadas: list.filter(a => a.status === "Confirmada").length,
+      completadas: list.filter(a => a.status === "Completada").length,
+      pendientes: list.filter(a => a.status === "Pendiente").length,
+      canceladas: list.filter(a => a.status === "Cancelada").length,
+    };
+
+    // Statistics table
+    doc.setFontSize(12);
+    doc.setTextColor(30, 41, 59);
+    doc.text("Resumen de Estadísticas", 20, 55);
+    
+    autoTable(doc, {
+      startY: 60,
+      head: [["Métrica", "Cantidad"]],
+      body: [
+        ["Total de Citas", stats.total],
+        ["Confirmadas", stats.confirmadas],
+        ["Completadas", stats.completadas],
+        ["Pendientes", stats.pendientes],
+        ["Canceladas", stats.canceladas],
+      ],
+      theme: "grid",
+      headStyles: { fillColor: [59, 130, 246] },
+    });
+
+    // Details table
+    doc.text("Desglose Detallado de Citas", 20, (doc as any).lastAutoTable.finalY + 15);
+    
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable.finalY + 20,
+      head: [["Alumno", "Especialista", "Fecha", "Hora", "Estado"]],
+      body: list.slice(0, 50).map(a => [
+        a.studentName,
+        a.specialistName,
+        a.date,
+        a.time,
+        a.status
+      ]),
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [30, 41, 59] },
+    });
+
+    if (list.length > 50) {
+      doc.setFontSize(8);
+      doc.text(`* Mostrando solo los primeros 50 registros de ${list.length} totales.`, 20, (doc as any).lastAutoTable.finalY + 10);
+    }
+
+    doc.save(`reporte_${deptReport.replace(/\s+/g, '_').toLowerCase()}.pdf`);
   };
 
   const inputCls = "w-full px-4 py-3 rounded-xl border border-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 bg-slate-50/50 hover:bg-slate-50 transition-colors shadow-sm text-slate-700 text-sm";
@@ -2185,16 +2277,18 @@ function AdminDashboard() {
     { key: "eventos", label: "Publicar Evento", icon: Megaphone }
   ];
 
+
+
   const adminStats = [
-    { label: "Total Institucional", value: stats.total, icon: BarChart3, gradient: "from-slate-700 to-slate-900 shadow-slate-900/20" },
-    { label: "Pendientes Global", value: stats.pendientes, icon: Clock, gradient: "from-amber-500 to-amber-600 shadow-amber-500/20" },
-    { label: "Confirmadas", value: stats.confirmadas, icon: CalendarCheck, gradient: "from-blue-600 to-indigo-600 shadow-blue-600/20" },
-    { label: "Completadas", value: stats.completadas, icon: CheckCircle2, gradient: "from-emerald-500 to-emerald-600 shadow-emerald-500/20" },
-    { label: "Canceladas / Faltas", value: stats.canceladas, icon: XCircle, gradient: "from-rose-500 to-rose-600 shadow-rose-500/20" }
+    { label: "Total Institucional", value: summary.total, icon: BarChart3, gradient: "from-slate-700 to-slate-900 shadow-slate-900/20" },
+    { label: "Pendientes Global", value: summary.pendientes, icon: Clock, gradient: "from-amber-500 to-amber-600 shadow-amber-500/20" },
+    { label: "Confirmadas", value: summary.confirmadas, icon: CalendarCheck, gradient: "from-blue-600 to-indigo-600 shadow-blue-600/20" },
+    { label: "Completadas", value: summary.completadas, icon: CheckCircle2, gradient: "from-emerald-500 to-emerald-600 shadow-emerald-500/20" },
+    { label: "Canceladas / Faltas", value: summary.canceladas, icon: XCircle, gradient: "from-rose-500 to-rose-600 shadow-rose-500/20" }
   ];
 
   return (
-    <AppShell sidebar={{ tabs: sidebarTabs, active: activeTab, onSelect: setActiveTab, badges: { citas: stats.pendientes } }} role="admin" userName={user?.name} userEmail={user?.email} userDept="Administración Central">
+    <AppShell sidebar={{ tabs: sidebarTabs, active: activeTab, onSelect: setActiveTab, badges: { citas: summary.pendientes } }} role="admin" userName={user?.name} userEmail={user?.email} userDept="Administración Central">
       <div className="space-y-8 max-w-7xl mx-auto w-full pb-12">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Panel de Administración</h1>
@@ -2214,7 +2308,7 @@ function AdminDashboard() {
                 <div className={`w-12 h-12 ${cfg.bg} rounded-xl flex items-center justify-center`}><cfg.icon className="w-5 h-5" style={{ color: cfg.color }} /></div>
                 <div>
                   <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">{name}</p>
-                  <p className="text-slate-900 text-2xl font-black mt-0.5 leading-none">{stats.byDept[name]} <span className="text-slate-400 font-medium text-sm">citas</span></p>
+                  <p className="text-slate-900 text-2xl font-black mt-0.5 leading-none">{summary.byDept[name]} <span className="text-slate-400 font-medium text-sm">citas</span></p>
                 </div>
               </div>
               <TrendingUp className="w-5 h-5 text-slate-300 group-hover:text-blue-500 transition-colors" />
@@ -2402,7 +2496,7 @@ function AdminDashboard() {
                   <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Citas por Mes y Facultad</h4>
                     <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={CHART_MONTHLY} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <BarChart data={charts.monthly} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                         <XAxis dataKey="month" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} dy={10} />
                         <YAxis tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
@@ -2419,8 +2513,8 @@ function AdminDashboard() {
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Motivos Frecuentes</h4>
                     <ResponsiveContainer width="100%" height={300}>
                       <PieChart>
-                        <Pie data={CHART_MOTIVOS} cx="50%" cy="50%" outerRadius={100} innerRadius={60} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={{ stroke: '#cbd5e1' }}>
-                          {CHART_MOTIVOS.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                        <Pie data={charts.motivos} cx="50%" cy="50%" outerRadius={100} innerRadius={60} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={{ stroke: '#cbd5e1' }}>
+                          {charts.motivos.map((_, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                         </Pie>
                         <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
                       </PieChart>
@@ -2434,7 +2528,7 @@ function AdminDashboard() {
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Modalidad de Atención</h4>
                     <ResponsiveContainer width="100%" height={260}>
                       <PieChart>
-                        <Pie data={CHART_MODALIDAD} cx="50%" cy="50%" innerRadius={70} outerRadius={100} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={false}>
+                        <Pie data={charts.modalidad} cx="50%" cy="50%" innerRadius={70} outerRadius={100} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={false}>
                           <Cell fill="#3b82f6" /><Cell fill="#10b981" />
                         </Pie>
                         <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
@@ -2446,7 +2540,7 @@ function AdminDashboard() {
                   <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Distribución por Carrera</h4>
                     <ResponsiveContainer width="100%" height={260}>
-                      <BarChart data={CHART_CARRERA} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
+                      <BarChart data={charts.carrera} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
                         <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
                         <YAxis dataKey="name" type="category" tick={{ fontSize: 11, fill: "#475569", fontWeight: 500 }} axisLine={false} tickLine={false} width={120} />
@@ -2479,7 +2573,7 @@ function AdminDashboard() {
                     <div className={`w-16 h-16 bg-gradient-to-br ${r.gradient} ${r.shadow} rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg group-hover:scale-110 transition-transform`}><r.icon className="w-8 h-8 text-white" /></div>
                     <h4 className="text-slate-900 font-bold text-lg mb-2">{r.label}</h4>
                     <p className="text-slate-500 text-xs font-medium mb-6 flex-1">Datos consolidados del mes en curso, demografía y efectividad.</p>
-                    <Btn onClick={() => toast.success(`Reporte de ${r.label} generado`)} variant="outline" className={`w-full text-${r.color}-600 hover:bg-${r.color}-50 hover:border-${r.color}-200`}><Download className="w-4 h-4 mr-2" /> PDF Export</Btn>
+                    <Btn onClick={() => generatePDFReport(r.label)} variant="outline" className={`w-full text-${r.color}-600 hover:bg-${r.color}-50 hover:border-${r.color}-200`}><Download className="w-4 h-4 mr-2" /> PDF Export</Btn>
                   </div>
                 ))}
               </div>
@@ -2609,7 +2703,12 @@ function AdminDashboard() {
                       <div key={ev.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                         {ev.imageUrl && <div className="h-32 bg-slate-100 overflow-hidden relative">
                           <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent z-10" />
-                          <img src={ev.imageUrl} alt={ev.title} className="w-full h-full object-cover relative z-0" onError={(e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).style.display = "none" }} />
+                          <img 
+                            src={ev.imageUrl.startsWith('http') ? ev.imageUrl : `${API_BASE}${ev.imageUrl}`} 
+                            alt={ev.title} 
+                            className="w-full h-full object-cover relative z-0" 
+                            onError={(e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).style.display = "none" }} 
+                          />
                           <div className="absolute bottom-3 left-3 z-20 flex items-center gap-2">
                             <span className={`px - 2 py - 0.5 rounded - md font - bold text - [0.65rem] uppercase tracking - wider shadow - sm ${ev.type === "conferencia" ? "bg-violet-500 text-white" : "bg-blue-500 text-white"} `}>{ev.type === "conferencia" ? "Conferencia" : "Taller"}</span>
                             <span className="px-2 py-0.5 rounded-md font-bold text-[0.65rem] uppercase tracking-wider bg-black/40 text-white backdrop-blur-md">{ev.department}</span>

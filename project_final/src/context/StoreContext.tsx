@@ -228,7 +228,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const getAvailableDays = useCallback(async (specialistId: string, year: number, month: number) => {
     const spec = specialists.find(s => s.id === specialistId);
     if (!spec) return [];
-    const activeDows = [...new Set(spec.schedule.filter((s: any) => s.available).map((s: any) => s.dayOfWeek))];
+    
+    // Días de la semana con horarios recurrentes
+    const recurringDows = [...new Set(spec.schedule.filter((s: any) => s.available && s.specificDate === null).map((s: any) => s.dayOfWeek))];
+    // Fechas específicas con horarios únicos
+    const specificDates = [...new Set(spec.schedule.filter((s: any) => s.available && s.specificDate !== null).map((s: any) => s.specificDate))];
+    
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const dayChecks: { date: Date; promise: Promise<string[]> }[] = [];
 
@@ -238,8 +243,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const normalizedMonth = targetMonth % 12;
       for (let d = new Date(targetYear, normalizedMonth, 1), end = new Date(targetYear, normalizedMonth + 1, 0); d <= end; d.setDate(d.getDate() + 1)) {
         if (d < today) continue;
-        if (activeDows.includes(d.getDay())) {
-          const ds = d.toISOString().split("T")[0];
+        const ds = d.toISOString().split("T")[0];
+        
+        // Candidato si tiene horario recurrente para ese día de la semana O si tiene una fecha específica exacta
+        if (recurringDows.includes(d.getDay()) || specificDates.includes(ds)) {
           dayChecks.push({ date: new Date(d), promise: getAvailableSlots(specialistId, ds) });
         }
       }
@@ -277,42 +284,87 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ── events (persist to backend) ──
-  const addEvent = useCallback((ev: Omit<AppEvent, "id">) => {
-    fetch(`${API}/events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ev)
-    })
-    .then(res => res.json())
-    .then(newEv => setEvents(p => [newEv, ...p]))
-    .catch(console.error);
+  const addEvent = useCallback(async (ev: Omit<AppEvent, "id">, file?: File) => {
+    try {
+      const formData = new FormData();
+      Object.entries(ev).forEach(([key, value]) => {
+        if (value !== undefined) formData.append(key, value as string);
+      });
+      if (file) formData.append('image', file);
+
+      const res = await fetch(`${API}/events`, {
+        method: 'POST',
+        body: formData
+      });
+      if (res.ok) {
+        const newEv = await res.json();
+        setEvents(p => [newEv, ...p]);
+      }
+    } catch (error) { console.error('Error adding event:', error); }
   }, []);
 
   // ── resources (persist to backend) ──
-  const addResource = useCallback((r: Omit<Resource, "id">) => {
-    fetch(`${API}/resources`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(r)
-    })
-    .then(res => res.json())
-    .then(newRes => setResources(p => [...p, newRes]))
-    .catch(console.error);
+  const addResource = useCallback(async (r: Omit<Resource, "id">, file?: File) => {
+    try {
+      const formData = new FormData();
+      Object.entries(r).forEach(([key, value]) => {
+        if (value !== undefined) formData.append(key, value as string);
+      });
+      if (file) formData.append('file', file);
+
+      const res = await fetch(`${API}/resources`, {
+        method: 'POST',
+        body: formData
+      });
+      if (res.ok) {
+        const newRes = await res.json();
+        setResources(p => [...p, newRes]);
+      }
+    } catch (error) { console.error('Error adding resource:', error); }
   }, []);
 
+  const [realStats, setRealStats] = useState<any>(null);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/stats`);
+      if (res.ok) {
+        const data = await res.json();
+        setRealStats(data);
+      }
+    } catch (error) { console.error('Error fetching real stats:', error); }
+  }, []);
+
+  React.useEffect(() => {
+    fetchStats();
+  }, [appointments, fetchStats]);
+
   // ── stats ──
-  const getStats = useCallback(() => ({
-    total: appointments.length,
-    pendientes: appointments.filter(a => a.status === "Pendiente").length,
-    confirmadas: appointments.filter(a => a.status === "Confirmada").length,
-    completadas: appointments.filter(a => a.status === "Completada").length,
-    canceladas: appointments.filter(a => a.status === "Cancelada").length,
-    byDept: {
-      Psicología: appointments.filter(a => a.department === "Psicología").length,
-      Tutorías: appointments.filter(a => a.department === "Tutorías").length,
-      Nutrición: appointments.filter(a => a.department === "Nutrición").length
-    },
-  }), [appointments]);
+  const getStats = useCallback(() => {
+    if (realStats) return realStats;
+    
+    // Fallback while loading or if error
+    return {
+      summary: {
+        total: appointments.length,
+        pendientes: appointments.filter(a => a.status === "Pendiente").length,
+        confirmadas: appointments.filter(a => a.status === "Confirmada").length,
+        completadas: appointments.filter(a => a.status === "Completada").length,
+        canceladas: appointments.filter(a => a.status === "Cancelada").length,
+        byDept: {
+          Psicología: appointments.filter(a => a.department === "Psicología").length,
+          Tutorías: appointments.filter(a => a.department === "Tutorías").length,
+          Nutrición: appointments.filter(a => a.department === "Nutrición").length
+        }
+      },
+      charts: {
+        monthly: [],
+        motivos: [],
+        modalidad: [],
+        carrera: []
+      }
+    };
+  }, [appointments, realStats]);
 
   const deleteUser = useCallback(async (id: string) => {
     try {

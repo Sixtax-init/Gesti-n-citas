@@ -170,17 +170,23 @@ router.get('/:id/available-slots', async (req, res) => {
       return res.status(400).json({ error: 'Fecha requerida' });
     }
 
-    const d = new Date(date + "T12:00:00");
-    const dayOfWeek = d.getDay();
+    const requestedDate = new Date(date + "T12:00:00");
+    requestedDate.setHours(0, 0, 0, 0);
+    const dayOfWeek = requestedDate.getDay();
     
-    // Calculate week: 0 for current week, 1 for next week
+    // Calculate week relative to the "Current Planning Week"
+    // If today is Sunday, the current planning week starts tomorrow (Monday)
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    const diff = d.getTime() - now.getTime();
-    const diffDays = Math.ceil(diff / (1000 * 3600 * 24));
+    const dayShift = now.getDay() === 0 ? 1 : 1 - now.getDay();
+    const mondayOfCurrentWeek = new Date(now);
+    mondayOfCurrentWeek.setDate(now.getDate() + dayShift);
     
-    // Simple week calculation: if date is > 6 days from today, it's next week
-    const requestedWeek = diffDays > 6 ? 1 : 0;
+    const diffMs = requestedDate.getTime() - mondayOfCurrentWeek.getTime();
+    const diffWeeks = Math.floor(diffMs / (7 * 24 * 3600 * 1000));
+    
+    // Ensure we don't return negative weeks for previous days (though UI filters them)
+    const requestedWeek = Math.max(0, diffWeeks);
 
     const specialist = await prisma.specialist.findUnique({
       where: { id },
@@ -189,12 +195,21 @@ router.get('/:id/available-slots', async (req, res) => {
 
     if (!specialist) return res.status(404).json({ error: 'No encontrado' });
 
-    // Filter by day of week AND week (if week is null, it's for both weeks)
-    const activeSlotsForDay = specialist.schedules.filter((s: any) => 
-      s.dayOfWeek === dayOfWeek && 
-      s.available && 
-      (s.week === null || s.week === requestedWeek)
+    // Priority: 
+    // 1. Slots with specificDate === date
+    // 2. If no specificDate slots exist for this dayOfWeek, use recurring week slots
+    let activeSlotsForDay = specialist.schedules.filter((s: any) => 
+      s.specificDate === date && s.available
     );
+
+    if (activeSlotsForDay.length === 0) {
+      activeSlotsForDay = specialist.schedules.filter((s: any) => 
+        s.dayOfWeek === dayOfWeek && 
+        s.available && 
+        s.specificDate === null &&
+        (s.week === null || s.week === requestedWeek)
+      );
+    }
 
     const appointmentsOnDate = await prisma.appointment.findMany({
       where: { specialistId: id, date: date, status: { not: "Cancelada" } }
@@ -220,7 +235,7 @@ router.get('/:id/available-slots', async (req, res) => {
 router.post('/:id/schedules', async (req, res) => {
   try {
     const { id } = req.params;
-    const { dayOfWeek, startTime, endTime, week } = req.body;
+    const { dayOfWeek, startTime, endTime, week, specificDate } = req.body;
 
     const slot = await prisma.scheduleSlot.create({
       data: {
@@ -228,7 +243,8 @@ router.post('/:id/schedules', async (req, res) => {
         dayOfWeek,
         startTime,
         endTime,
-        week: week === undefined ? null : week
+        week: week === undefined ? null : (week === "both" ? null : parseInt(String(week))),
+        specificDate: specificDate || null
       }
     });
 
