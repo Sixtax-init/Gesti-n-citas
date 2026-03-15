@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import html2canvas from "html2canvas";
 
 import {
   User, Specialist, Appointment, AppEvent, Resource, AppNotification,
@@ -2100,6 +2101,12 @@ function AdminDashboard() {
   // New content (Resource)
   const [ctitle, setCtitle] = useState(""), [cdesc, setCdesc] = useState(""), [ctype, setCtype] = useState("video"), [curl, setCurl] = useState(""), [cimgUrl, setCimgUrl] = useState(""), [cdept, setCdept] = useState("Psicología");
 
+  // Chart refs for PDF
+  const chartMonthlyRef = useRef<HTMLDivElement>(null);
+  const chartMotivosRef = useRef<HTMLDivElement>(null);
+  const chartModalidadRef = useRef<HTMLDivElement>(null);
+  const chartCarreraRef = useRef<HTMLDivElement>(null);
+
   const fullStats = getStats();
   const summary = fullStats.summary;
   const charts = fullStats.charts;
@@ -2190,30 +2197,30 @@ function AdminDashboard() {
     setCtitle(""); setCdesc(""); setCurl(""); setCimgUrl(""); setSelectedFile(null);
   };
 
-  const generatePDFReport = (deptReport: string) => {
+  const generatePDFReport = async (deptReport: string) => {
     const doc = new jsPDF();
     const today = new Date().toLocaleDateString("es-MX");
     
     // Header
     doc.setFontSize(22);
     doc.setTextColor(30, 41, 59);
-    doc.text("Sistema de Gestión de Citas", 105, 20, { align: "center" });
+    doc.text("Sistema de Gestión de Citas", 105, 15, { align: "center" });
     doc.setFontSize(14);
-    doc.text(`Reporte Institucional: ${deptReport}`, 105, 30, { align: "center" });
+    doc.text(`Reporte Institucional: ${deptReport}`, 105, 23, { align: "center" });
     doc.setFontSize(10);
     doc.setTextColor(100, 116, 139);
-    doc.text(`Fecha de generación: ${today}`, 105, 38, { align: "center" });
+    doc.text(`Fecha de generación: ${today}`, 105, 29, { align: "center" });
     
     // Line separator
     doc.setDrawColor(226, 232, 240);
-    doc.line(20, 45, 190, 45);
+    doc.line(20, 35, 190, 35);
 
-    // Filtering data
+    // Filter data
     const list = deptReport === "Reporte Global" 
       ? allAppts 
       : allAppts.filter(a => a.department === deptReport);
 
-    const stats = {
+    const statsDetail = {
       total: list.length,
       confirmadas: list.filter(a => a.status === "Confirmada").length,
       completadas: list.filter(a => a.status === "Completada").length,
@@ -2221,32 +2228,73 @@ function AdminDashboard() {
       canceladas: list.filter(a => a.status === "Cancelada").length,
     };
 
-    // Statistics table
+    // Summary table
     doc.setFontSize(12);
     doc.setTextColor(30, 41, 59);
-    doc.text("Resumen de Estadísticas", 20, 55);
+    doc.text("Resumen de Estadísticas", 20, 45);
     
     autoTable(doc, {
-      startY: 60,
+      startY: 50,
       head: [["Métrica", "Cantidad"]],
       body: [
-        ["Total de Citas", stats.total],
-        ["Confirmadas", stats.confirmadas],
-        ["Completadas", stats.completadas],
-        ["Pendientes", stats.pendientes],
-        ["Canceladas", stats.canceladas],
+        ["Total de Citas", statsDetail.total],
+        ["Confirmadas", statsDetail.confirmadas],
+        ["Completadas", statsDetail.completadas],
+        ["Pendientes", statsDetail.pendientes],
+        ["Canceladas", statsDetail.canceladas],
       ],
       theme: "grid",
       headStyles: { fillColor: [59, 130, 246] },
+      margin: { left: 20, right: 20 }
     });
 
-    // Details table
-    doc.text("Desglose Detallado de Citas", 20, (doc as any).lastAutoTable.finalY + 15);
+    let currentY = (doc as any).lastAutoTable.finalY + 15;
+
+    // Charts inclusion (only if activeTab is estadisticas or we can capture them)
+    // NOTE: This assumes charts are mounted in the DOM. For a more robust solution,
+    // we would render hidden charts or ensure they are visible.
+    const addChartToDoc = async (ref: React.RefObject<HTMLDivElement | null>, title: string, y: number) => {
+      if (ref.current) {
+        try {
+          const canvas = await html2canvas(ref.current, { scale: 2 });
+          const imgData = canvas.toDataURL("image/png");
+          doc.setFontSize(12);
+          doc.text(title, 20, y);
+          doc.addImage(imgData, "PNG", 20, y + 5, 170, 85);
+          return y + 100;
+        } catch (e) { console.error("Error capturing chart", e); return y; }
+      }
+      return y;
+    };
+
+    if (activeTab === "estadisticas") {
+      doc.addPage();
+      doc.text("Análisis Visual de Datos", 105, 15, { align: "center" });
+      currentY = 25;
+
+      currentY = await addChartToDoc(chartMonthlyRef, "Tendencias Mensuales", currentY);
+      currentY = await addChartToDoc(chartMotivosRef, "Distribución de Motivos", currentY);
+      
+      doc.addPage();
+      currentY = 15;
+      currentY = await addChartToDoc(chartModalidadRef, "Modalidad de Atención", currentY);
+      currentY = await addChartToDoc(chartCarreraRef, "Distribución por Carrera", currentY);
+    } else {
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text("* Cambie a la pestaña de 'Estadísticas' para incluir gráficas en el reporte.", 20, currentY);
+      currentY += 10;
+    }
+
+    doc.addPage();
+    doc.setFontSize(12);
+    doc.setTextColor(30, 41, 59);
+    doc.text("Desglose Detallado de Citas", 20, 15);
     
     autoTable(doc, {
-      startY: (doc as any).lastAutoTable.finalY + 20,
+      startY: 20,
       head: [["Alumno", "Especialista", "Fecha", "Hora", "Estado"]],
-      body: list.slice(0, 50).map(a => [
+      body: list.slice(0, 100).map(a => [
         a.studentName,
         a.specialistName,
         a.date,
@@ -2255,14 +2303,16 @@ function AdminDashboard() {
       ]),
       styles: { fontSize: 8 },
       headStyles: { fillColor: [30, 41, 59] },
+      margin: { left: 20, right: 20 }
     });
 
-    if (list.length > 50) {
+    if (list.length > 100) {
       doc.setFontSize(8);
-      doc.text(`* Mostrando solo los primeros 50 registros de ${list.length} totales.`, 20, (doc as any).lastAutoTable.finalY + 10);
+      doc.text(`* Mostrando los primeros 100 registros de ${list.length} totales.`, 20, (doc as any).lastAutoTable.finalY + 10);
     }
 
     doc.save(`reporte_${deptReport.replace(/\s+/g, '_').toLowerCase()}.pdf`);
+    toast.success("Reporte generado con éxito.");
   };
 
   const inputCls = "w-full px-4 py-3 rounded-xl border border-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 bg-slate-50/50 hover:bg-slate-50 transition-colors shadow-sm text-slate-700 text-sm";
@@ -2493,7 +2543,7 @@ function AdminDashboard() {
               <div className="space-y-6">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Monthly Trends */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div ref={chartMonthlyRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Citas por Mes y Facultad</h4>
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={charts.monthly} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -2509,7 +2559,7 @@ function AdminDashboard() {
                   </div>
 
                   {/* Top Reasons */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div ref={chartMotivosRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Motivos Frecuentes</h4>
                     <ResponsiveContainer width="100%" height={300}>
                       <PieChart>
@@ -2524,7 +2574,7 @@ function AdminDashboard() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Modality */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div ref={chartModalidadRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Modalidad de Atención</h4>
                     <ResponsiveContainer width="100%" height={260}>
                       <PieChart>
@@ -2537,7 +2587,7 @@ function AdminDashboard() {
                   </div>
 
                   {/* By Career */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div ref={chartCarreraRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Distribución por Carrera</h4>
                     <ResponsiveContainer width="100%" height={260}>
                       <BarChart data={charts.carrera} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
@@ -2860,8 +2910,19 @@ function AdminDashboard() {
 // APP ROUTER
 // ─────────────────────────────────────────────
 function AppRouter() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
   const [view, setView] = useState("login");
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-slate-500 font-bold animate-pulse">Iniciando sesión...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated || !user) {
     if (view === "register") return <RegisterForm onSwitchToLogin={() => setView("login")} />;
