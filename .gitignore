@@ -2,8 +2,20 @@ project_final/node_modules/
 project_final/dist/
 project_final/.env
 project_final/*.log
+project_final/*.db
+project_final/*.db-journal
+
+server/node_modules/
+server/dist/
+server/.env
+server/prisma/*.db
+server/prisma/*.db-journal
+server/*.log
 
 node_modules/
 dist/
 .env
+*.db
+*.db-journal
 *.log
+*.txt

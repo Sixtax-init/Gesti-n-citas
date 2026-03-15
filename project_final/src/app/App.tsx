@@ -13,463 +13,20 @@ import {
   PieChart, Pie, Cell,
 } from "recharts";
 
-// ─────────────────────────────────────────────
-// TYPES & INTERFACES
-// ─────────────────────────────────────────────
-interface ScheduleSlot {
-  id: string;
-  dayOfWeek: number;
-  startTime: string;
-  endTime: string;
-  available: boolean;
-  week?: number; // 0: current, 1: next, undefined: both
-}
-
-interface User {
-  id: string;
-  email: string;
-  password?: string;
-  name: string;
-  role: string;
-  matricula?: string;
-  carrera?: string;
-  semestre?: number;
-  edad?: number;
-  genero?: string;
-  department?: string;
-}
-
-interface Specialist {
-  id: string;
-  userId: string;
-  name: string;
-  department: string;
-  email: string;
-  active: boolean;
-  schedule: ScheduleSlot[];
-}
-
-interface Appointment {
-  id: string;
-  studentId: string;
-  studentName: string;
-  specialistId: string;
-  specialistName: string;
-  department: string;
-  date: string;
-  time: string;
-  status: string;
-  modality: string;
-  motivo: string;
-  notes?: string;
-  createdAt: string;
-}
-
-interface AppEvent {
-  id: string;
-  title: string;
-  description: string;
-  department: string;
-  date: string;
-  time: string;
-  type: string;
-  imageUrl?: string;
-  registrationUrl?: string;
-}
-
-interface Resource {
-  id: string;
-  department: string;
-  type: string;
-  title: string;
-  description: string;
-  url: string;
-  imageUrl?: string;
-  fileUrl?: string;
-  fileName?: string;
-}
-
-interface AppointmentFilters {
-  studentId?: string;
-  specialistId?: string;
-  department?: string;
-  status?: string;
-}
-
-interface StoreContextType {
-  getUserById: (id: string) => User | null;
-  loginUser: (email: string, password: string) => User | null;
-  specialists: Specialist[];
-  getSpecialists: (dept?: string) => Specialist[];
-  getSpecialistById: (id: string) => Specialist | null;
-  addSpecialist: (data: Partial<Specialist>) => void;
-  appointments: Appointment[];
-  getAppointments: (filters?: AppointmentFilters) => Appointment[];
-  createAppointment: (req: { studentId: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string }) => Appointment;
-  updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean) => void;
-  rescheduleAppointment: (id: string, newDate: string, newTime: string, byRole?: 'specialist' | 'student', modality?: string) => void;
-  getAvailableSlots: (specialistId: string, dateStr: string) => string[];
-  getAvailableDays: (specialistId: string, year: number, month: number) => Date[];
-  addScheduleSlot: (specialistId: string, slot: Omit<ScheduleSlot, "id">) => void;
-  removeScheduleSlot: (specialistId: string, slotId: string) => void;
-  events: AppEvent[];
-  addEvent: (ev: Omit<AppEvent, "id">) => void;
-  resources: Resource[];
-  addResource: (r: Omit<Resource, "id">) => void;
-  getStats: () => { total: number; pendientes: number; confirmadas: number; completadas: number; canceladas: number; byDept: Record<string, number> };
-  notifications: Record<string, AppNotification[]>;
-  addNotification: (userId: string, notif: Omit<AppNotification, "id" | "time" | "read">) => void;
-  markNotificationsRead: (userId: string) => void;
-}
-
-interface AppNotification {
-  id: string;
-  title: string;
-  message: string;
-  time: string;
-  read: boolean;
-  type: string;
-}
-
-interface AuthContextType {
-  user: User | null;
-  isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
-  register: (data: Partial<User>) => Promise<boolean>;
-  logout: () => void;
-}
-
-// ─────────────────────────────────────────────
-// CONSTANTS
-// ─────────────────────────────────────────────
-const DEPT_CONFIG: Record<string, { color: string; bg: string; border: string; icon: React.ComponentType<any> }> = {
-  "Psicología": { color: "#2563EB", bg: "bg-[#dbeafe]", border: "border-[#93c5fd]", icon: Brain },
-  "Tutorías": { color: "#16A34A", bg: "bg-[#dcfce7]", border: "border-[#86efac]", icon: GraduationCap },
-  "Nutrición": { color: "#EA580C", bg: "bg-[#fff7ed]", border: "border-[#fdba74]", icon: Apple },
-};
-
-const DEPT_REASONS: Record<string, string[]> = {
-  "Psicología": ["Situaciones académicas", "Situaciones emocionales", "Situaciones de salud física o mental", "No estoy seguro del porqué", "Lo sugirió mi maestro o tutor", "Problemas económicos"],
-  "Tutorías": ["Dificultades en materias específicas", "Orientación vocacional y profesional", "Técnicas y hábitos de estudio", "Planeación académica del semestre", "Asesoría para servicio social o residencias", "Bajo rendimiento académico"],
-  "Nutrición": ["Valoración nutricional inicial", "Plan de alimentación personalizado", "Trastornos de la conducta alimentaria", "Control de peso", "Alimentación deportiva", "Educación nutricional general"],
-};
-
-const DAY_NAMES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-const DAYS_FULL = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-
-const STATUS_BADGE_CONFIG: Record<string, { cls: string }> = {
-  Pendiente: { cls: "bg-[#fef3c7] text-[#d97706]" },
-  Confirmada: { cls: "bg-[#dbeafe] text-[#2563EB]" },
-  Completada: { cls: "bg-[#dcfce7] text-[#16A34A]" },
-  Cancelada: { cls: "bg-[#fef2f2] text-[#dc2626]" },
-};
-
-// ─────────────────────────────────────────────
-// MOCK SEED DATA
-// ─────────────────────────────────────────────
-const SEED_USERS = [
-  { id: "u1", email: "admin@instituto.edu.mx", password: "admin123", name: "Admin Sistema", role: "admin" },
-  { id: "u2", email: "alumno@instituto.edu.mx", password: "alumno123", name: "María García López", role: "alumno", matricula: "20210001", carrera: "Ing. en Sistemas Computacionales", semestre: 5, edad: 21, genero: "Femenino" },
-  { id: "u3", email: "psicologo@instituto.edu.mx", password: "esp123", name: "Dr. Carlos Mendoza", role: "especialista", department: "Psicología" },
-  { id: "u4", email: "tutor@instituto.edu.mx", password: "esp123", name: "Mtra. Ana Ruiz", role: "especialista", department: "Tutorías" },
-  { id: "u5", email: "nutriologo@instituto.edu.mx", password: "esp123", name: "Lic. Roberto Sánchez", role: "especialista", department: "Nutrición" },
-];
-
-const SEED_SPECIALISTS = [
-  {
-    id: "s1", userId: "u3", name: "Dr. Carlos Mendoza", department: "Psicología", email: "psicologo@instituto.edu.mx", active: true,
-    schedule: [{ id: "ss1", dayOfWeek: 1, startTime: "09:00", endTime: "10:00", available: true }, { id: "ss2", dayOfWeek: 1, startTime: "10:00", endTime: "11:00", available: true }, { id: "ss3", dayOfWeek: 1, startTime: "11:00", endTime: "12:00", available: true }, { id: "ss4", dayOfWeek: 3, startTime: "09:00", endTime: "10:00", available: true }, { id: "ss5", dayOfWeek: 3, startTime: "10:00", endTime: "11:00", available: true }, { id: "ss6", dayOfWeek: 5, startTime: "14:00", endTime: "15:00", available: true }, { id: "ss7", dayOfWeek: 5, startTime: "15:00", endTime: "16:00", available: true }]
-  },
-  {
-    id: "s2", userId: "u4", name: "Mtra. Ana Ruiz", department: "Tutorías", email: "ana.ruiz@instituto.edu.mx", active: true,
-    schedule: [{ id: "ss8", dayOfWeek: 2, startTime: "08:00", endTime: "09:00", available: true }, { id: "ss9", dayOfWeek: 2, startTime: "09:00", endTime: "10:00", available: true }, { id: "ss10", dayOfWeek: 4, startTime: "10:00", endTime: "11:00", available: true }, { id: "ss11", dayOfWeek: 4, startTime: "11:00", endTime: "12:00", available: true }]
-  },
-  {
-    id: "s3", userId: "u5", name: "Lic. Roberto Sánchez", department: "Nutrición", email: "roberto.s@instituto.edu.mx", active: true,
-    schedule: [{ id: "ss12", dayOfWeek: 1, startTime: "13:00", endTime: "14:00", available: true }, { id: "ss13", dayOfWeek: 1, startTime: "14:00", endTime: "15:00", available: true }, { id: "ss14", dayOfWeek: 3, startTime: "13:00", endTime: "14:00", available: true }, { id: "ss15", dayOfWeek: 5, startTime: "09:00", endTime: "10:00", available: true }]
-  },
-];
-
-const SEED_APPOINTMENTS = [
-  { id: "a1", studentId: "u2", studentName: "María García López", specialistId: "s1", specialistName: "Dr. Carlos Mendoza", department: "Psicología", date: "2026-03-16", time: "09:00", status: "Confirmada", modality: "Presencial", motivo: "Estrés académico y ansiedad", createdAt: "2026-03-01T10:00:00Z" },
-  { id: "a2", studentId: "u2", studentName: "María García López", specialistId: "s2", specialistName: "Mtra. Ana Ruiz", department: "Tutorías", date: "2026-03-18", time: "09:00", status: "Pendiente", modality: "Virtual", motivo: "Asesoría en materias de programación", createdAt: "2026-03-02T14:00:00Z" },
-  { id: "a3", studentId: "u2", studentName: "María García López", specialistId: "s1", specialistName: "Dr. Carlos Mendoza", department: "Psicología", date: "2026-02-10", time: "10:00", status: "Completada", modality: "Presencial", motivo: "Orientación vocacional", notes: "Seguimiento en 2 semanas.", createdAt: "2026-02-01T08:00:00Z" },
-  { id: "a4", studentId: "u2", studentName: "María García López", specialistId: "s2", specialistName: "Mtra. Ana Ruiz", department: "Tutorías", date: "2026-01-22", time: "10:00", status: "Completada", modality: "Virtual", motivo: "Planificación académica", createdAt: "2026-01-15T08:00:00Z" },
-];
-
-const SEED_EVENTS = [
-  { id: "e1", title: "Taller: Manejo del Estrés Académico", description: "Técnicas efectivas para manejar el estrés. Ejercicios de respiración y mindfulness.", department: "Psicología", date: "2026-03-15", time: "10:00", type: "taller", imageUrl: "https://images.unsplash.com/photo-1607551848581-7ee851bf978b?w=400&q=80" },
-  { id: "e2", title: "Feria de Nutrición Saludable", description: "Evaluaciones nutricionales gratuitas, tips de alimentación balanceada.", department: "Nutrición", date: "2026-03-20", time: "09:00", type: "taller", imageUrl: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80" },
-  { id: "e3", title: "Tutoría Grupal: Matemáticas y Cálculo", description: "Sesión abierta para resolver dudas de cálculo diferencial y álgebra lineal.", department: "Tutorías", date: "2026-03-18", time: "14:00", type: "taller", imageUrl: "https://images.unsplash.com/photo-1509062522246-3755977927d7?w=400&q=80" },
-  { id: "e4", title: "Conferencia: Salud Mental en la Universidad", description: "Ponencia sobre salud mental y rendimiento académico.", department: "Psicología", date: "2026-03-25", time: "11:00", type: "conferencia", imageUrl: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80" },
-];
-
-const SEED_RESOURCES = [
-  { id: "r1", department: "Psicología", type: "image", title: "Infografía: Técnicas de Relajación", description: "Guía con 5 técnicas de respiración para momentos de estrés.", url: "#", imageUrl: "https://images.unsplash.com/photo-1607551848581-7ee851bf978b?w=400&q=80" },
-  { id: "r2", department: "Psicología", type: "video", title: "Video: Manejo de la Ansiedad", description: "Sesión grabada con ejercicios prácticos.", url: "#" },
-  { id: "r3", department: "Psicología", type: "link", title: "Test de Ansiedad en Línea", description: "Autoevaluación confidencial. Resultados inmediatos.", url: "#" },
-  { id: "r4", department: "Tutorías", type: "image", title: "Infografía: Técnicas de Estudio Efectivo", description: "Métodos probados: Pomodoro, Cornell, mapas mentales.", url: "#", imageUrl: "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=400&q=80" },
-  { id: "r5", department: "Tutorías", type: "link", title: "Guía de Planificación Académica", description: "Herramienta para organizar tu semestre y horarios de estudio.", url: "#" },
-  { id: "r6", department: "Tutorías", type: "video", title: "Video: Cómo preparar un examen", description: "Estrategias para estudiar de forma eficiente.", url: "#" },
-  { id: "r7", department: "Nutrición", type: "image", title: "Infografía: Plan Alimenticio Estudiantil", description: "Opciones de comidas balanceadas, económicas y rápidas.", url: "#", imageUrl: "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&q=80" },
-  { id: "r8", department: "Nutrición", type: "video", title: "Video: Hidratación y Rendimiento", description: "Cómo la hidratación afecta tu concentración académica.", url: "#" },
-  { id: "r9", department: "Nutrición", type: "link", title: "Calculadora de Calorías", description: "Herramienta interactiva para necesidades calóricas diarias.", url: "#" },
-];
-
-const CHART_MONTHLY = [
-  { month: "Ene", Psicología: 45, Tutorías: 38, Nutrición: 22 },
-  { month: "Feb", Psicología: 52, Tutorías: 42, Nutrición: 28 },
-  { month: "Mar", Psicología: 38, Tutorías: 35, Nutrición: 18 },
-];
-const CHART_MOTIVOS = [{ name: "Ansiedad", value: 35 }, { name: "Estrés académico", value: 28 }, { name: "Orientación vocacional", value: 20 }, { name: "Alimentación", value: 17 }];
-const CHART_MODALIDAD = [{ name: "Presencial", value: 65 }, { name: "Virtual", value: 35 }];
-const CHART_CARRERA = [{ name: "Ing. Sistemas", value: 42 }, { name: "Ing. Industrial", value: 28 }, { name: "Administración", value: 20 }, { name: "Contaduría", value: 15 }, { name: "Otros", value: 10 }];
-const PIE_COLORS = ["#2563EB", "#16A34A", "#EA580C", "#8b5cf6", "#ec4899"];
-
-// ─────────────────────────────────────────────
-// DATA STORE CONTEXT
-// ─────────────────────────────────────────────
-const StoreContext = createContext<StoreContextType | null>(null);
-
-function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [users, setUsers] = useState([...SEED_USERS]);
-  const [specialists, setSpecialists] = useState([...SEED_SPECIALISTS]);
-  const [appointments, setAppointments] = useState([...SEED_APPOINTMENTS]);
-  const [events, setEvents] = useState<AppEvent[]>([...SEED_EVENTS] as AppEvent[]);
-  const [resources, setResources] = useState([...SEED_RESOURCES]);
-  const [notifications, setNotifications] = useState<Record<string, AppNotification[]>>({
-    u1: [
-      { id: "d1", title: "Nuevo especialista", message: "Se agregó a Lic. Fernanda Torres al departamento de Nutrición.", time: "Hace 30 min", read: false, type: "new_user" },
-      { id: "d2", title: "Reporte generado", message: "El reporte mensual de Psicología fue generado exitosamente.", time: "Hace 2 horas", read: false, type: "report" },
-    ],
-    u2: [
-      { id: "a1", title: "Cita confirmada", message: "Tu cita de Nutrición del 6 de marzo ha sido confirmada.", time: "Hace 10 min", read: false, type: "confirmed" },
-      { id: "a2", title: "Recordatorio de cita", message: "Tienes una cita mañana a las 10:00 con Mtra. Ana Ruiz.", time: "Hace 2 horas", read: false, type: "reminder" },
-    ],
-    u3: [
-      { id: "e1", title: "Nueva cita agendada", message: "María García López solicitó cita para el 6 de marzo a las 09:00.", time: "Hace 15 min", read: false, type: "confirmed" },
-    ]
-  });
-
-  const addNotification = useCallback((userId: string, notif: Omit<AppNotification, "id" | "time" | "read">) => {
-    const newNotif: AppNotification = {
-      ...notif,
-      id: `n${Date.now()}`,
-      time: "Ahora",
-      read: false
-    };
-    setNotifications(p => ({
-      ...p,
-      [userId]: [newNotif, ...(p[userId] || [])]
-    }));
-  }, []);
-
-  const markNotificationsRead = useCallback((userId: string) => {
-    setNotifications(p => ({
-      ...p,
-      [userId]: (p[userId] || []).map(n => ({ ...n, read: true }))
-    }));
-  }, []);
-
-  // ── auth ──
-  const loginUser = useCallback((email: string, password: string) => users.find(u => u.email === email && u.password === password) || null, [users]);
-  const getUserById = useCallback((id: string) => users.find(u => u.id === id) || null, [users]);
-
-  // ── specialists ──
-  const getSpecialists = useCallback((dept?: string) => dept ? specialists.filter(s => s.department === dept) : [...specialists], [specialists]);
-  const getSpecialistById = useCallback((id: string) => specialists.find(s => s.id === id) || null, [specialists]);
-  const addSpecialist = useCallback((data: Partial<Specialist>) => setSpecialists(p => [...p, { ...data, id: `s${Date.now()} `, name: data.name || '', department: data.department || '', email: data.email || '', userId: data.userId || '', active: true, schedule: [] }]), []);
-
-  // ── appointments ──
-  const getAppointments = useCallback((filters: AppointmentFilters = {}) => {
-    let r = [...appointments];
-    if (filters.studentId) r = r.filter(a => a.studentId === filters.studentId);
-    if (filters.specialistId) r = r.filter(a => a.specialistId === filters.specialistId);
-    if (filters.department) r = r.filter(a => a.department === filters.department);
-    if (filters.status) r = r.filter(a => a.status === filters.status);
-    return r.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [appointments]);
-
-  const createAppointment = useCallback((req: { studentId: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string }) => {
-    const spec = specialists.find(s => s.id === req.specialistId);
-    const student = users.find(u => u.id === req.studentId);
-    const newAppt = {
-      id: `a${Date.now()} `, studentId: req.studentId, studentName: student?.name || "Alumno",
-      specialistId: req.specialistId, specialistName: spec?.name || "Especialista",
-      department: req.department, date: req.preferredDate, time: req.preferredTime,
-      status: "Pendiente", modality: req.modality, motivo: req.motivo, createdAt: new Date().toISOString(),
-    };
-    setAppointments(p => [newAppt, ...p]);
-    return newAppt;
-  }, [specialists, users]);
-
-  const updateAppointmentStatus = useCallback((id: string, status: string, notes?: string, byStudent?: boolean) => {
-    setAppointments(p => {
-      const appt = p.find(a => a.id === id);
-      if (appt && status === "Cancelada") {
-        if (!byStudent) {
-          addNotification(appt.studentId, {
-            title: "Cita Cancelada",
-            message: `El especialista ${appt.specialistName} ha cancelado la cita de ${appt.department} del ${new Date(appt.date + "T12:00:00").toLocaleDateString()} a las ${appt.time}.`,
-            type: "cancelled"
-          });
-        } else {
-          addNotification(appt.specialistId, {
-            title: "Cita Cancelada por Alumno",
-            message: `El alumno ${appt.studentName} ha cancelado la cita del ${new Date(appt.date + "T12:00:00").toLocaleDateString()} a las ${appt.time}. Motivo: ${notes || 'Sin especificar'}`,
-            type: "cancelled"
-          });
-        }
-      }
-      return p.map(a => a.id === id ? { ...a, status, ...(notes ? { notes } : {}) } : a);
-    });
-  }, [addNotification]);
-
-  const rescheduleAppointment = useCallback((id: string, newDate: string, newTime: string, byRole?: 'specialist' | 'student', modality?: string) => {
-    setAppointments(p => {
-      const appt = p.find(a => a.id === id);
-      if (appt) {
-        const newModality = modality || appt.modality;
-        const modalityChanged = modality && modality !== appt.modality;
-        if (byRole === 'specialist') {
-          addNotification(appt.studentId, {
-            title: "Cita Reagendada",
-            message: `Tu cita con ${appt.specialistName} ha sido reagendada para el ${new Date(newDate + "T12:00:00").toLocaleDateString()} a las ${newTime}.`,
-            type: "reschedule"
-          });
-        } else if (byRole === 'student') {
-          addNotification(appt.specialistId, {
-            title: "Cita Reagendada por Alumno",
-            message: `El alumno ${appt.studentName} ha reagendado su cita para el ${new Date(newDate + "T12:00:00").toLocaleDateString()} a las ${newTime}.${modalityChanged ? ` La modalidad cambió a ${newModality}.` : ''}`,
-            type: "reschedule"
-          });
-        }
-      }
-      return p.map(a => a.id === id ? { ...a, date: newDate, time: newTime, status: "Pendiente", ...(modality && { modality }) } : a);
-    });
-  }, [addNotification]);
-
-  // ── available slots (real logic from v0-project) ──
-  const getAvailableSlots = useCallback((specialistId: string, dateStr: string) => {
-    const spec = specialists.find(s => s.id === specialistId);
-    if (!spec) return [];
-    const dayOfWeek = new Date(dateStr + "T12:00:00").getDay();
-    const daySlots = spec.schedule.filter(s => s.dayOfWeek === dayOfWeek && s.available).map(s => s.startTime);
-    const booked = appointments.filter(a => a.specialistId === specialistId && a.date === dateStr && a.status !== "Cancelada").map(a => a.time);
-    return daySlots.filter(t => !booked.includes(t));
-  }, [specialists, appointments]);
-
-  const getAvailableDays = useCallback((specialistId: string, year: number, month: number) => {
-    const spec = specialists.find(s => s.id === specialistId);
-    if (!spec) return [];
-    const activeDows = [...new Set(spec.schedule.filter(s => s.available).map(s => s.dayOfWeek))];
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const days: Date[] = [];
-    // Scan current month and next month to cover a full window of available dates
-    for (let m = 0; m < 2; m++) {
-      const targetMonth = month + m;
-      const targetYear = targetMonth > 11 ? year + 1 : year;
-      const normalizedMonth = targetMonth % 12;
-      for (let d = new Date(targetYear, normalizedMonth, 1), end = new Date(targetYear, normalizedMonth + 1, 0); d <= end; d.setDate(d.getDate() + 1)) {
-        if (d < today) continue;
-        if (activeDows.includes(d.getDay())) {
-          const ds = d.toISOString().split("T")[0];
-          if (getAvailableSlots(specialistId, ds).length > 0) days.push(new Date(d));
-        }
-      }
-    }
-    return days;
-  }, [specialists, getAvailableSlots]);
-
-  // ── schedule management ──
-  const addScheduleSlot = useCallback((specialistId: string, slot: Omit<ScheduleSlot, "id">) => {
-    setSpecialists(p => p.map(s => s.id === specialistId ? { ...s, schedule: [...s.schedule, { ...slot, id: `ss${Date.now()} ` }] } : s));
-  }, []);
-  const removeScheduleSlot = useCallback((specialistId: string, slotId: string) => {
-    setSpecialists(p => p.map(s => s.id === specialistId ? { ...s, schedule: s.schedule.filter(sl => sl.id !== slotId) } : s));
-  }, []);
-
-  // ── events & resources ──
-  const addEvent = useCallback((ev: Omit<AppEvent, "id">) => setEvents(p => [{ ...ev, id: `e${Date.now()} ` } as AppEvent, ...p]), []);
-  const addResource = useCallback((r: Omit<Resource, "id">) => setResources(p => [...p, { ...r, id: `r${Date.now()} ` }]), []);
-
-  // ── stats ──
-  const getStats = useCallback(() => ({
-    total: appointments.length,
-    pendientes: appointments.filter(a => a.status === "Pendiente").length,
-    confirmadas: appointments.filter(a => a.status === "Confirmada").length,
-    completadas: appointments.filter(a => a.status === "Completada").length,
-    canceladas: appointments.filter(a => a.status === "Cancelada").length,
-    byDept: { Psicología: appointments.filter(a => a.department === "Psicología").length, Tutorías: appointments.filter(a => a.department === "Tutorías").length, Nutrición: appointments.filter(a => a.department === "Nutrición").length },
-  }), [appointments]);
-
-  return (
-    <StoreContext.Provider value={{
-      loginUser, getUserById, specialists, getSpecialists, getSpecialistById, addSpecialist,
-      appointments, getAppointments, createAppointment, updateAppointmentStatus, rescheduleAppointment,
-      getAvailableSlots, getAvailableDays, addScheduleSlot, removeScheduleSlot, events, addEvent,
-      resources, addResource, getStats, notifications, addNotification, markNotificationsRead
-    }}>
-      {children}
-    </StoreContext.Provider>
-  );
-}
-const useStore = (): StoreContextType => { const c = useContext(StoreContext); if (!c) throw new Error("useStore must be inside StoreProvider"); return c; };
-
-// ─────────────────────────────────────────────
-// AUTH CONTEXT
-// ─────────────────────────────────────────────
-const AuthContext = createContext<AuthContextType | null>(null);
-
-function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { loginUser } = useStore();
-  const [user, setUser] = useState<User | null>(null);
-
-  const login = useCallback(async (email: string, password: string) => {
-    const found = loginUser(email, password);
-    if (found) { const { password: _, ...u } = found; setUser(u as User); return true; }
-    return false;
-  }, [loginUser]);
-
-  const register = useCallback(async (data: Partial<User>) => {
-    const newUser = { id: `u${Date.now()} `, name: '', email: '', role: "alumno", ...data } as User;
-    setUser(newUser);
-    return true;
-  }, []);
-
-  const logout = useCallback(() => setUser(null), []);
-
-  return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, register, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
-}
-const useAuth = (): AuthContextType => { const c = useContext(AuthContext); if (!c) throw new Error("useAuth must be inside AuthProvider"); return c; };
-
-// ─────────────────────────────────────────────
-// NOTIFICATIONS DATA
-// ─────────────────────────────────────────────
-const NOTIFICATIONS: Record<string, { id: string; title: string; message: string; time: string; read: boolean; type: string }[]> = {
-  alumno: [
-    { id: "a1", title: "Cita confirmada", message: "Tu cita de Nutrición del 6 de marzo ha sido confirmada.", time: "Hace 10 min", read: false, type: "confirmed" },
-    { id: "a2", title: "Recordatorio de cita", message: "Tienes una cita mañana a las 10:00 con Mtra. Ana Ruiz.", time: "Hace 2 horas", read: false, type: "reminder" },
-    { id: "a3", title: "Nuevo taller disponible", message: "Taller: Manejo del Estrés Académico — Psicología, 15 de marzo.", time: "Hace 1 día", read: true, type: "event" },
-    { id: "a4", title: "Reagendamiento exitoso", message: "Tu cita de Tutorías fue reagendada al 10 de marzo a las 11:00.", time: "Hace 2 días", read: true, type: "reschedule" },
-  ],
-  especialista: [
-    { id: "e1", title: "Nueva cita agendada", message: "María García López solicitó cita para el 6 de marzo a las 09:00.", time: "Hace 15 min", read: false, type: "confirmed" },
-    { id: "e2", title: "Cita reagendada", message: "Luis Hernández reagendó su cita del 5 al 10 de marzo.", time: "Hace 1 hora", read: false, type: "reschedule" },
-    { id: "e3", title: "Recordatorio", message: "Tienes 3 citas programadas para mañana.", time: "Hace 4 horas", read: true, type: "reminder" },
-    { id: "e4", title: "Cita cancelada", message: "Pedro Sánchez canceló su cita del 7 de marzo.", time: "Hace 1 día", read: true, type: "cancelled" },
-  ],
-  admin: [
-    { id: "d1", title: "Nuevo especialista", message: "Se agregó a Lic. Fernanda Torres al departamento de Nutrición.", time: "Hace 30 min", read: false, type: "new_user" },
-    { id: "d2", title: "Reporte generado", message: "El reporte mensual de Psicología fue generado exitosamente.", time: "Hace 2 horas", read: false, type: "report" },
-    { id: "d3", title: "Alta actividad", message: "Psicología registró 15 citas esta semana, un 20% más que la anterior.", time: "Hace 1 día", read: true, type: "reminder" },
-    { id: "d4", title: "Evento publicado", message: "Se publicó el taller 'Manejo del Estrés' para el 15 de marzo.", time: "Hace 2 días", read: true, type: "event" },
-  ],
-};
+import {
+  User, Specialist, Appointment, AppEvent, Resource, AppNotification,
+  StoreContextType, AuthContextType
+} from "../types";
+import {
+  DEPT_CONFIG, DEPT_REASONS, DAY_NAMES, DAYS_FULL, STATUS_BADGE_CONFIG
+} from "../constants";
+import {
+  SEED_USERS, SEED_SPECIALISTS, SEED_APPOINTMENTS, SEED_EVENTS, SEED_RESOURCES,
+  CHART_MONTHLY, CHART_MOTIVOS, CHART_MODALIDAD, CHART_CARRERA, PIE_COLORS,
+  ROLE_NOTIFICATIONS as NOTIFICATIONS
+} from "../data/mockData";
+import { useStore } from "../context/StoreContext";
+import { useAuth } from "../context/AuthContext";
 
 function NotifIcon({ type }: { type: string }) {
   const props = { className: "w-4 h-4" };
@@ -1185,37 +742,42 @@ function StudentDashboard() {
 
   const resetCita = () => { setStep(1); setSelDept(null); setSelSpecId(null); setSelDate(null); setSelSlot(null); setSelReason(""); setSelModality("Presencial"); setConfidentialityAccepted(false); };
 
-  const availDates = useMemo(() => {
-    if (!selSpecId) return [];
+  const [availDates, setAvailDates] = useState<Date[]>([]);
+  const [slotsForDate, setSlotsForDate] = useState<string[]>([]);
+  const [reschedAvailDates, setReschedAvailDates] = useState<Date[]>([]);
+  const [reschedSlotsForDate, setReschedSlotsForDate] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!selSpecId) { setAvailDates([]); return; }
     const now = new Date();
-    return getAvailableDays(selSpecId, now.getFullYear(), now.getMonth());
+    getAvailableDays(selSpecId, now.getFullYear(), now.getMonth()).then(setAvailDates);
   }, [selSpecId, getAvailableDays]);
 
-  const slotsForDate = useMemo(() => {
-    if (!selDate || !selSpecId) return [];
-    return getAvailableSlots(selSpecId, selDate.toISOString().split("T")[0]);
+  useEffect(() => {
+    if (!selDate || !selSpecId) { setSlotsForDate([]); return; }
+    getAvailableSlots(selSpecId, selDate.toISOString().split("T")[0]).then(setSlotsForDate);
   }, [selDate, selSpecId, getAvailableSlots]);
 
-  const reschedAvailDates = useMemo(() => {
-    if (!reschedApptId) return [];
+  useEffect(() => {
+    if (!reschedApptId) { setReschedAvailDates([]); return; }
     const appt = appointments.find(a => a.id === reschedApptId);
-    if (!appt) return [];
+    if (!appt) { setReschedAvailDates([]); return; }
     const now = new Date();
-    return getAvailableDays(appt.specialistId, now.getFullYear(), now.getMonth());
+    getAvailableDays(appt.specialistId, now.getFullYear(), now.getMonth()).then(setReschedAvailDates);
   }, [reschedApptId, appointments, getAvailableDays]);
 
-  const reschedSlotsForDate = useMemo(() => {
-    if (!reschedDate || !reschedApptId) return [];
+  useEffect(() => {
+    if (!reschedDate || !reschedApptId) { setReschedSlotsForDate([]); return; }
     const appt = appointments.find(a => a.id === reschedApptId);
-    if (!appt) return [];
-    return getAvailableSlots(appt.specialistId, reschedDate.toISOString().split("T")[0]);
+    if (!appt) { setReschedSlotsForDate([]); return; }
+    getAvailableSlots(appt.specialistId, reschedDate.toISOString().split("T")[0]).then(setReschedSlotsForDate);
   }, [reschedDate, reschedApptId, appointments, getAvailableSlots]);
 
   const deptSpecialists = selDept ? getSpecialists(selDept) : [];
   const selSpec = deptSpecialists.find(s => s.id === selSpecId);
 
   const handleConfirmCita = () => {
-    createAppointment({ studentId: user!.id, specialistId: selSpecId!, department: selDept!, motivo: selReason, modality: selModality, preferredDate: selDate!.toISOString().split("T")[0], preferredTime: selSlot! });
+    createAppointment({ studentId: user!.id, studentName: user!.name, specialistId: selSpecId!, department: selDept!, motivo: selReason, modality: selModality, preferredDate: selDate!.toISOString().split("T")[0], preferredTime: selSlot! });
     setStep(4);
   };
 
@@ -1828,7 +1390,7 @@ function StudentDashboard() {
 // ─────────────────────────────────────────────
 function SpecialistDashboard() {
   const { user } = useAuth();
-  const { specialists, getAppointments, updateAppointmentStatus, addScheduleSlot, removeScheduleSlot, addEvent, addResource, rescheduleAppointment, getAvailableDays, getAvailableSlots } = useStore();
+  const { specialists, specialistsLoaded, getAppointments, updateAppointmentStatus, addScheduleSlot, removeScheduleSlot, addEvent, addResource, rescheduleAppointment, getAvailableDays, getAvailableSlots } = useStore();
   const spec = specialists.find(s => s.userId === user?.id);
   const dept = (user?.department || "Psicología");
 
@@ -1879,14 +1441,17 @@ function SpecialistDashboard() {
     setShowResch(false);
   };
 
-  const reschedDates = useMemo(() => {
-    if (!spec) return [];
-    return getAvailableDays(spec.id, new Date().getFullYear(), new Date().getMonth());
+  const [reschedDates, setReschedDates] = useState<Date[]>([]);
+  const [reschedSlots, setReschedSlots] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!spec) { setReschedDates([]); return; }
+    getAvailableDays(spec.id, new Date().getFullYear(), new Date().getMonth()).then(setReschedDates);
   }, [spec, getAvailableDays]);
 
-  const reschedSlots = useMemo(() => {
-    if (!selReschedDate || !spec) return [];
-    return getAvailableSlots(spec.id, selReschedDate.toISOString().split("T")[0]);
+  useEffect(() => {
+    if (!selReschedDate || !spec) { setReschedSlots([]); return; }
+    getAvailableSlots(spec.id, selReschedDate.toISOString().split("T")[0]).then(setReschedSlots);
   }, [selReschedDate, spec, getAvailableSlots]);
 
   // Schedule management
@@ -1918,7 +1483,9 @@ function SpecialistDashboard() {
       if (editingSlotId && s.id === editingSlotId) return false;
 
       const sameDay = s.dayOfWeek === dayInt;
-      const weekConflict = s.week === undefined || weekVal === undefined || s.week === weekVal;
+      // Prisma returns null if field is not set, while frontend uses undefined or 'both'
+      const sWeek = s.week === null ? undefined : s.week;
+      const weekConflict = sWeek === undefined || weekVal === undefined || sWeek === weekVal;
       const timeOverlap = newStart < s.endTime && newEnd > s.startTime;
 
       return sameDay && weekConflict && timeOverlap;
@@ -2000,10 +1567,18 @@ function SpecialistDashboard() {
     setEvTitle(""); setEvDesc(""); setEvDate(""); setEvTime(""); setEvImg(""); setEvRegUrl(""); setSelectedEventImg(null);
   };
 
+  if (!specialistsLoaded) return (
+    <div className="flex flex-col items-center justify-center min-h-[50vh] text-center">
+      <div className="w-12 h-12 rounded-full border-4 border-blue-600 border-t-transparent animate-spin mb-4" />
+      <p className="text-slate-500 font-medium">Cargando perfil...</p>
+    </div>
+  );
+
   if (!user || !spec) return (
     <div className="flex flex-col items-center justify-center min-h-[50vh] text-center">
       <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4"><Users className="w-8 h-8 text-slate-400" /></div>
       <p className="text-slate-500 font-medium">No se encontró perfil de especialista.</p>
+      <p className="text-slate-400 text-sm mt-1">Verifica que tu usuario esté vinculado a un especialista en la base de datos.</p>
     </div>
   );
 
@@ -2438,7 +2013,7 @@ function SpecialistDashboard() {
 // ─────────────────────────────────────────────
 function AdminDashboard() {
   const { user } = useAuth();
-  const { getAppointments, updateAppointmentStatus, getStats, specialists, addSpecialist, events, addEvent, addResource } = useStore();
+  const { getAppointments, updateAppointmentStatus, getStats, specialists, addSpecialist, updateSpecialist, removeSpecialist, events, addEvent, addResource, users, deleteUser } = useStore();
 
   const [activeTab, setActiveTab] = useState("citas");
   const [deptFilter, setDeptFilter] = useState("Todos");
@@ -2452,6 +2027,8 @@ function AdminDashboard() {
 
   // New specialist
   const [newName, setNewName] = useState(""), [newDept, setNewDept] = useState("Psicología"), [newEmail, setNewEmail] = useState(""), [newPass, setNewPass] = useState(""), [newSched, setNewSched] = useState("");
+  const [editingSpec, setEditingSpec] = useState<Specialist | null>(null);
+  const [editPass, setEditPass] = useState("");
 
   // New event
   const [evTitle, setEvTitle] = useState(""), [evDesc, setEvDesc] = useState(""), [evDept, setEvDept] = useState("Psicología"), [evDate, setEvDate] = useState(""), [evTime, setEvTime] = useState(""), [evType, setEvType] = useState("taller"), [evImg, setEvImg] = useState(""), [evRegUrl, setEvRegUrl] = useState("");
@@ -2477,11 +2054,25 @@ function AdminDashboard() {
     setActionAppt(null); setActionStatus(null);
   };
 
-  const handleAddSpec = () => {
-    if (!newName || !newEmail) { toast.error("Nombre y correo son obligatorios"); return; }
-    addSpecialist({ name: newName, department: newDept, email: newEmail, userId: `u${Date.now()} ` });
-    toast.success(`${newName} agregado(a) al departamento de ${newDept} `);
+  const handleAddSpec = async () => {
+    if (!newName || !newEmail || !newPass) { toast.error("Nombre, correo y contraseña son obligatorios"); return; }
+    await addSpecialist({ name: newName, department: newDept, email: newEmail, password: newPass });
+    toast.success(`${newName} registrado correctamente`);
     setNewName(""); setNewEmail(""); setNewPass(""); setNewSched("");
+  };
+
+  const handleUpdateSpec = async () => {
+    if (!editingSpec) return;
+    await updateSpecialist(editingSpec.id, {
+      name: editingSpec.name,
+      department: editingSpec.department,
+      email: editingSpec.email,
+      active: editingSpec.active,
+      ...(editPass && { password: editPass })
+    });
+    toast.success("Especialista actualizado");
+    setEditingSpec(null);
+    setEditPass("");
   };
 
   const [selectedEventImg, setSelectedEventImg] = useState<File | null>(null);
@@ -2539,6 +2130,7 @@ function AdminDashboard() {
   const sidebarTabs = [
     { key: "citas", label: "Gestión de Citas", icon: CalendarDays },
     { key: "especialistas", label: "Especialistas", icon: Users },
+    { key: "estudiantes", label: "Estudiantes", icon: Users },
     { key: "estadisticas", label: "Estadísticas", icon: BarChart3 },
     { key: "reportes", label: "Reportes", icon: FileText },
     { key: "contenido", label: "Publicar Contenido", icon: FileText },
@@ -2686,7 +2278,29 @@ function AdminDashboard() {
                             <span className="text-slate-500 text-xs font-medium truncate">{esp.email}</span>
                           </div>
                         </div>
-                        <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-600 font-bold text-[0.65rem] uppercase tracking-wider shrink-0 border border-emerald-100">Activo</span>
+                        <span className={`px-2.5 py-1 rounded-full ${esp.active ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-100 text-slate-400 border-slate-200'} font-bold text-[0.65rem] uppercase tracking-wider shrink-0 border`}>
+                          {esp.active ? 'Activo' : 'Inactivo'}
+                        </span>
+                        
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button 
+                            onClick={() => setEditingSpec(esp)}
+                            className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              if (confirm(`¿Eliminar a ${esp.name}?`)) {
+                                removeSpecialist(esp.id);
+                                toast.success("Especialista eliminado");
+                              }
+                            }}
+                            className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -2950,8 +2564,107 @@ function AdminDashboard() {
               </div>
             </div>
           )}
+
+          {/* ─── Estudiantes Tab ─── */}
+          {activeTab === "estudiantes" && (
+            <div className="p-8">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                <div>
+                  <h3 className="text-2xl font-bold text-slate-900">Gestión de Estudiantes</h3>
+                  <p className="text-slate-500 font-medium mt-1">{users.filter((u: any) => u.role === 'alumno').length} estudiantes registrados.</p>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50/50">
+                      {["Nombre", "Matrícula", "Carrera", "Semestre", "Email", "Acciones"].map(h => (
+                        <th key={h} className="px-6 py-4 text-slate-500 font-bold tracking-wider uppercase text-[0.65rem]">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {users.filter((u: any) => u.role === 'alumno').map((est: any) => (
+                      <tr key={est.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <p className="text-slate-900 font-bold text-sm tracking-tight">{est.name}</p>
+                        </td>
+                        <td className="px-6 py-4 text-slate-500 font-medium text-sm">{est.matricula || "N/A"}</td>
+                        <td className="px-6 py-4">
+                          <span className="px-2 py-1 rounded bg-blue-50 text-blue-600 text-[0.65rem] font-bold uppercase">{est.carrera || "General"}</span>
+                        </td>
+                        <td className="px-6 py-4 text-slate-500 font-medium text-sm">{est.semestre || "—"}°</td>
+                        <td className="px-6 py-4 text-slate-400 text-xs font-medium">{est.email}</td>
+                        <td className="px-6 py-4">
+                          <button 
+                            onClick={() => {
+                              if (confirm(`¿Seguro que deseas eliminar al estudiante ${est.name}? Esta acción no se puede deshacer.`)) {
+                                deleteUser(est.id);
+                                toast.success("Estudiante eliminado correctamente");
+                              }
+                            }}
+                            className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                          >
+                            <XCircle className="w-5 h-5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {users.filter((u: any) => u.role === 'alumno').length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <Users className="w-12 h-12 text-slate-300 mb-4" />
+                    <h4 className="text-slate-900 font-bold">No hay estudiantes</h4>
+                    <p className="text-slate-500 font-medium text-sm">No se encontraron registros de alumnos en la base de datos.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Modal: Editar Especialista */}
+      <Modal open={!!editingSpec} onClose={() => setEditingSpec(null)} title="Editar Especialista" subtitle={editingSpec?.name} maxWidth="max-w-md">
+        <div className="space-y-4">
+          <div>
+            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Nombre</label>
+            <input type="text" value={editingSpec?.name || ""} onChange={e => setEditingSpec(p => p ? { ...p, name: e.target.value } : null)} className={inputCls} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Email</label>
+              <input type="email" value={editingSpec?.email || ""} onChange={e => setEditingSpec(p => p ? { ...p, email: e.target.value } : null)} className={inputCls} />
+            </div>
+            <div>
+              <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Departamento</label>
+              <select value={editingSpec?.department || ""} onChange={e => setEditingSpec(p => p ? { ...p, department: e.target.value } : null)} className={inputCls}>
+                <option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase text-blue-600">Cambiar Contraseña (opcional)</label>
+            <input type="text" value={editPass} onChange={e => setEditPass(e.target.value)} placeholder="Dejar vacío para mantener actual" className={inputCls} />
+          </div>
+          <div className="flex items-center gap-2 pt-2">
+            <input 
+              type="checkbox" 
+              id="spec-active" 
+              checked={editingSpec?.active || false} 
+              onChange={e => setEditingSpec(p => p ? { ...p, active: e.target.checked } : null)} 
+              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+            />
+            <label htmlFor="spec-active" className="text-sm font-bold text-slate-700 underline underline-offset-4 decoration-blue-100">Cuenta Activa</label>
+          </div>
+          <div className="pt-4 flex gap-3">
+            <Btn variant="ghost" onClick={() => setEditingSpec(null)} className="flex-1">Cancelar</Btn>
+            <Btn onClick={handleUpdateSpec} className="flex-2 bg-blue-600 shadow-blue-600/20">Guardar Cambios</Btn>
+          </div>
+        </div>
+      </Modal>
 
       {/* Action modal */}
       <Modal open={!!actionAppt && !!actionStatus} onClose={() => { setActionAppt(null); setActionStatus(null); }} title={`Cambiar estado a: ${actionStatus} `} subtitle={actionAppt ? `${actionAppt.studentName} — ${actionAppt.date} a las ${actionAppt.time} ` : ""} maxWidth="max-w-md">
@@ -2996,11 +2709,9 @@ function AppRouter() {
 // ─────────────────────────────────────────────
 export default function App() {
   return (
-    <StoreProvider>
-      <AuthProvider>
-        <AppRouter />
-        <Toaster position="top-right" richColors />
-      </AuthProvider>
-    </StoreProvider>
+    <>
+      <AppRouter />
+      <Toaster position="top-right" richColors />
+    </>
   );
 }
