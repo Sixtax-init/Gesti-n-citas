@@ -41,10 +41,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       .then(setResources)
       .catch(console.error);
 
-    fetch(`${API}/users`)
+    fetch(`${API}/users?t=${Date.now()}`)
       .then(res => res.json())
-      .then(setUsers)
-      .catch(console.error);
+      .then(data => {
+        console.log("DEBUG: Usuarios cargados desde API:", data);
+        setUsers(data);
+      })
+      .catch(err => {
+        console.error("DEBUG: Error cargando usuarios:", err);
+      });
   }, []);
 
   const addNotification = useCallback((userId: string, notif: Omit<AppNotification, "id" | "time" | "read">) => {

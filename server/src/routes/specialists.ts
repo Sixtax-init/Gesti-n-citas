@@ -31,7 +31,7 @@ router.get('/', async (req, res) => {
 // POST /api/specialists
 router.post('/', async (req, res) => {
   try {
-    const { name, department, email, password } = req.body;
+    const { name, department, email, password, shift } = req.body;
     
     if (!name || !email || !password || !department) {
       return res.status(400).json({ error: 'Faltan campos obligatorios' });
@@ -61,7 +61,8 @@ router.post('/', async (req, res) => {
           name,
           department,
           email,
-          active: true
+          active: true,
+          shift: shift || "Matutino"
         },
         include: { schedules: true }
       });
@@ -80,7 +81,7 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, department, email, password, active } = req.body;
+    const { name, department, email, password, active, shift } = req.body;
 
     const specialist = await prisma.specialist.findUnique({ where: { id } });
     if (!specialist) return res.status(404).json({ error: 'No encontrado' });
@@ -106,7 +107,8 @@ router.patch('/:id', async (req, res) => {
           ...(name && { name }),
           ...(email && { email }),
           ...(department && { department }),
-          ...(active !== undefined && { active })
+          ...(active !== undefined && { active }),
+          ...(shift && { shift })
         },
         include: { schedules: true }
       });

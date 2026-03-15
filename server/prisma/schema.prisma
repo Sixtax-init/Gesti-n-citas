@@ -35,6 +35,7 @@ model Specialist {
   department String
   email      String
   active     Boolean  @default(true)
+  shift      String?  // "Matutino", "Vespertino"
   
   schedules    ScheduleSlot[]
   appointments Appointment[] @relation("SpecialistAppointments")

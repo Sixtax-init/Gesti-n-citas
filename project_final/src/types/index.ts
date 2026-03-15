@@ -30,6 +30,7 @@ export interface Specialist {
   department: string;
   email: string;
   active: boolean;
+  shift?: string;
   schedule: ScheduleSlot[];
 }
 

@@ -158,7 +158,7 @@ function Tabs({ tabs, defaultTab, children }: { tabs: { key: string; label: stri
   );
 }
 
-function Modal({ open, onClose, title, subtitle, children, maxWidth = "max-w-xl" }: { open: boolean; onClose: () => void; title: string; subtitle?: string; children: React.ReactNode; maxWidth?: string }) {
+function Modal({ open, onClose, title, subtitle, children, maxWidth = "max-w-xl" }: { open: boolean; onClose: () => void; title: string; subtitle?: React.ReactNode; children: React.ReactNode; maxWidth?: string }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1086,20 +1086,35 @@ function StudentDashboard() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <label className="block text-slate-900 font-bold text-sm"><Users className="w-4 h-4 inline mr-1.5 text-blue-600" />Especialista preferido</label>
-                    <div className="space-y-3">
-                      {deptSpecialists.map(sp => (
-                        <button key={sp.id} onClick={() => setSelSpecId(sp.id)}
-                          className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 transition-all cursor-pointer text-left ${selSpecId === sp.id ? "border-blue-600 bg-blue-50/50" : "border-slate-100 hover:border-blue-200 hover:bg-slate-50"}`}>
-                          <Avatar name={sp.name} size="sm" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-slate-900 font-semibold text-sm truncate">{sp.name}</p>
-                            <p className="text-slate-500 text-xs truncate">{sp.email}</p>
+                    <div className="space-y-6">
+                      {["Matutino", "Vespertino"].map(shift => {
+                        const specsInShift = deptSpecialists.filter(s => (s.shift || "Matutino") === shift);
+                        if (specsInShift.length === 0) return null;
+                        
+                        return (
+                          <div key={shift} className="space-y-3">
+                            <h5 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
+                              <div className={`w-1.5 h-1.5 rounded-full ${shift === 'Matutino' ? 'bg-amber-400' : 'bg-indigo-400'}`} />
+                              Turno {shift}
+                            </h5>
+                            <div className="space-y-2">
+                              {specsInShift.map(sp => (
+                                <button key={sp.id} onClick={() => setSelSpecId(sp.id)}
+                                  className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 transition-all cursor-pointer text-left ${selSpecId === sp.id ? "border-blue-600 bg-blue-50/50" : "border-slate-100 hover:border-blue-200 hover:bg-slate-50"}`}>
+                                  <Avatar name={sp.name} size="sm" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-slate-900 font-semibold text-sm truncate">{sp.name}</p>
+                                    <p className="text-slate-500 text-xs truncate">{sp.email}</p>
+                                  </div>
+                                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${selSpecId === sp.id ? "border-blue-600" : "border-slate-200"}`}>
+                                    {selSpecId === sp.id && <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${selSpecId === sp.id ? "border-blue-600" : "border-slate-200"}`}>
-                            {selSpecId === sp.id && <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
-                          </div>
-                        </button>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -1465,10 +1480,27 @@ function SpecialistDashboard() {
   const openEditSlot = (slot: any) => {
     setEditingSlotId(slot.id);
     setNewDay(slot.dayOfWeek);
-    setNewWeek(slot.week === undefined ? "both" : slot.week);
+    setNewWeek(slot.week === null || slot.week === undefined ? "both" : slot.week);
     setNewStart(slot.startTime);
     setNewEnd(slot.endTime);
     setShowAddSched(true);
+  };
+
+  const handleOpenAddSlot = (day: number, week: number) => {
+    setEditingSlotId(null);
+    setNewDay(day);
+    setNewWeek(week);
+    setNewStart("09:00");
+    setNewEnd("13:00");
+    setShowAddSched(true);
+  };
+
+  const isPastDay = (date: Date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d < today;
   };
 
   const handleAddSched = () => {
@@ -1739,7 +1771,12 @@ function SpecialistDashboard() {
                   <p className="text-slate-500 font-medium mt-1">Hoy es <span className="text-blue-600 font-bold">{new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</span></p>
                   <p className="text-rose-500 text-xs font-bold mt-2 uppercase tracking-tight flex items-center gap-1.5"><Info className="w-3.5 h-3.5" /> Se recomienda dar de alta horarios con 1 semana de anticipación.</p>
                 </div>
-                <Btn onClick={() => setShowAddSched(true)} className="bg-blue-600 text-white shadow-blue-600/20"><Plus className="w-4 h-4 mr-1.5" /> Agregar Horario</Btn>
+                <div className="flex items-center gap-3 px-5 py-3 bg-blue-50 border border-blue-100 rounded-2xl animate-in fade-in slide-in-from-right-4 duration-500">
+                  <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0 shadow-sm">
+                    <Plus className="w-4 h-4 text-white" />
+                  </div>
+                  <p className="text-blue-800 text-sm font-bold leading-tight">Haz clic en un día del calendario <br/><span className="text-blue-600 font-black uppercase text-[10px] tracking-widest">Para agregar un Horario</span></p>
+                </div>
               </div>
 
               {[0, 1].map(weekOffset => {
@@ -1767,7 +1804,11 @@ function SpecialistDashboard() {
                         const isPast = dateObj < new Date(new Date().setHours(0, 0, 0, 0));
 
                         return (
-                          <div key={`${weekOffset}-${day}`} className={`bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 min-h-[140px] sm:min-h-[160px] shadow-sm flex-shrink-0 w-[210px] sm:w-[240px] md:w-auto snap-start transition-all ${isPast ? "opacity-40" : ""}`}>
+                          <div 
+                            key={`${weekOffset}-${day}`} 
+                            onClick={() => !isPast && handleOpenAddSlot(dow, weekOffset)}
+                            className={`bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 min-h-[140px] sm:min-h-[160px] shadow-sm flex-shrink-0 w-[210px] sm:w-[240px] md:w-auto snap-start transition-all ${isPast ? "opacity-40" : "cursor-pointer hover:border-blue-400 hover:ring-4 hover:ring-blue-400/5 hover:bg-white"}`}
+                          >
                             <div className="flex flex-col mb-3 sm:mb-4">
                               <p className="text-slate-900 font-bold uppercase tracking-wider text-[0.6rem] sm:text-xs">{day}</p>
                               <p className="text-indigo-600 font-black text-[0.55rem] sm:text-[0.65rem] uppercase">{dateStr}</p>
@@ -1779,8 +1820,8 @@ function SpecialistDashboard() {
                                     <span className="text-slate-700 font-bold text-[0.7rem] sm:text-sm tracking-tighter">{s.startTime}-{s.endTime}</span>
                                     {!isPast && (
                                       <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button onClick={() => openEditSlot(s)} className="text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg p-1 transition-colors cursor-pointer"><Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></button>
-                                        <button onClick={() => { removeScheduleSlot(spec.id, s.id); toast.success("Horario eliminado exitosamente."); }} className="text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg p-1 transition-colors cursor-pointer"><Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></button>
+                                        <button onClick={(e) => { e.stopPropagation(); openEditSlot(s); }} className="text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg p-1 transition-colors cursor-pointer"><Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></button>
+                                        <button onClick={(e) => { e.stopPropagation(); removeScheduleSlot(spec.id, s.id); toast.success("Horario eliminado exitosamente."); }} className="text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg p-1 transition-colors cursor-pointer"><Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></button>
                                       </div>
                                     )}
                                   </div>
@@ -1800,24 +1841,31 @@ function SpecialistDashboard() {
                 );
               })}
 
-              <Modal open={showAddSched} onClose={() => { setShowAddSched(false); setEditingSlotId(null); }} title={editingSlotId ? "Editar Horario" : "Agregar Horario"} subtitle={editingSlotId ? "Modifica los parámetros de este bloque de atención" : "Define un nuevo bloque de atención recurrente"} maxWidth="max-w-md">
+              <Modal open={showAddSched} onClose={() => { setShowAddSched(false); setEditingSlotId(null); }} title={editingSlotId ? "Editar Horario" : "Agregar Horario"} subtitle={editingSlotId ? "Modifica los parámetros de este bloque de atención" : (
+                <div className="flex items-center gap-2 text-blue-600 font-bold text-sm mt-1">
+                  <Calendar className="w-4 h-4" />
+                  <span>{DAYS_FULL[Number(newDay)]} • {newWeek === "both" ? "Ambas Semanas" : newWeek === 0 ? "Semana Actual" : "Próxima Semana"}</span>
+                </div>
+              )} maxWidth="max-w-md">
                 <div className="space-y-5">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block mb-2 text-slate-900 font-bold text-sm">Día</label>
-                      <select value={newDay} onChange={e => setNewDay(e.target.value)} className={inputCls}>
-                        {[1, 2, 3, 4, 5].map(d => <option key={d} value={d}>{DAYS_FULL[d]}</option>)}
-                      </select>
+                  {(editingSlotId) && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block mb-2 text-slate-900 font-bold text-sm">Día</label>
+                        <select value={newDay} onChange={e => setNewDay(e.target.value)} className={inputCls}>
+                          {[1, 2, 3, 4, 5].map(d => <option key={d} value={d}>{DAYS_FULL[d]}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block mb-2 text-slate-900 font-bold text-sm">Semana</label>
+                        <select value={newWeek} onChange={e => setNewWeek(e.target.value)} className={inputCls}>
+                          <option value="both">Ambas Semanas</option>
+                          <option value="0">Semana Actual</option>
+                          <option value="1">Próxima Semana</option>
+                        </select>
+                      </div>
                     </div>
-                    <div>
-                      <label className="block mb-2 text-slate-900 font-bold text-sm">Semana</label>
-                      <select value={newWeek} onChange={e => setNewWeek(e.target.value)} className={inputCls}>
-                        <option value="both">Ambas Semanas</option>
-                        <option value="0">Semana Actual</option>
-                        <option value="1">Próxima Semana</option>
-                      </select>
-                    </div>
-                  </div>
+                  )}
                   <div className="grid grid-cols-2 gap-4">
                     <div><label className="block mb-2 text-slate-900 font-bold text-sm">Hora de Inicio</label><input type="time" value={newStart} onChange={e => setNewStart(e.target.value)} className={inputCls} /></div>
                     <div><label className="block mb-2 text-slate-900 font-bold text-sm">Hora de Fin</label><input type="time" value={newEnd} onChange={e => setNewEnd(e.target.value)} className={inputCls} /></div>
@@ -2026,7 +2074,7 @@ function AdminDashboard() {
   const [actionNotes, setActionNotes] = useState("");
 
   // New specialist
-  const [newName, setNewName] = useState(""), [newDept, setNewDept] = useState("Psicología"), [newEmail, setNewEmail] = useState(""), [newPass, setNewPass] = useState(""), [newSched, setNewSched] = useState("");
+  const [newName, setNewName] = useState(""), [newDept, setNewDept] = useState("Psicología"), [newEmail, setNewEmail] = useState(""), [newPass, setNewPass] = useState(""), [newSched, setNewSched] = useState(""), [newShift, setNewShift] = useState("Matutino");
   const [editingSpec, setEditingSpec] = useState<Specialist | null>(null);
   const [editPass, setEditPass] = useState("");
 
@@ -2056,7 +2104,7 @@ function AdminDashboard() {
 
   const handleAddSpec = async () => {
     if (!newName || !newEmail || !newPass) { toast.error("Nombre, correo y contraseña son obligatorios"); return; }
-    await addSpecialist({ name: newName, department: newDept, email: newEmail, password: newPass });
+    await addSpecialist({ name: newName, department: newDept, email: newEmail, password: newPass, shift: newShift });
     toast.success(`${newName} registrado correctamente`);
     setNewName(""); setNewEmail(""); setNewPass(""); setNewSched("");
   };
@@ -2277,6 +2325,13 @@ function AdminDashboard() {
                             <span className="text-slate-400 text-xs">•</span>
                             <span className="text-slate-500 text-xs font-medium truncate">{esp.email}</span>
                           </div>
+                          {esp.shift && (
+                            <div className="flex items-center gap-1 mt-2">
+                              <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-widest border border-blue-100 flex items-center gap-1">
+                                <Clock3 className="w-2.5 h-2.5" /> {esp.shift}
+                              </span>
+                            </div>
+                          )}
                         </div>
                         <span className={`px-2.5 py-1 rounded-full ${esp.active ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-100 text-slate-400 border-slate-200'} font-bold text-[0.65rem] uppercase tracking-wider shrink-0 border`}>
                           {esp.active ? 'Activo' : 'Inactivo'}
@@ -2319,8 +2374,15 @@ function AdminDashboard() {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div><label className="block mb-2 text-slate-900 font-bold text-sm">Contraseña temporal</label><input type="text" value={newPass} onChange={e => setNewPass(e.target.value)} placeholder="Contraseña inicial" className={inputCls} /></div>
-                      <div><label className="block mb-2 text-slate-900 font-bold text-sm">Horarios (opcional)</label><input type="text" value={newSched} onChange={e => setNewSched(e.target.value)} placeholder="Ej. Lun-Vie 09:00-14:00" className={inputCls} /></div>
+                      <div>
+                        <label className="block mb-2 text-slate-900 font-bold text-sm">Turno de Atención</label>
+                        <select value={newShift} onChange={e => setNewShift(e.target.value)} className={inputCls}>
+                          <option value="Matutino">Turno Matutino</option>
+                          <option value="Vespertino">Turno Vespertino</option>
+                        </select>
+                      </div>
                     </div>
+                    <div><label className="block mb-2 text-slate-900 font-bold text-sm">Horarios presenciales (opcional)</label><input type="text" value={newSched} onChange={e => setNewSched(e.target.value)} placeholder="Ej. Lun-Vie 09:00-14:00" className={inputCls} /></div>
 
                     <div className="pt-2"><Btn onClick={handleAddSpec} size="lg" className="w-full bg-blue-600 text-white shadow-blue-600/20"><Plus className="w-5 h-5 mr-2" /> Registrar Especialista</Btn></div>
                   </div>
@@ -2649,15 +2711,27 @@ function AdminDashboard() {
             <label className="block mb-1 text-slate-700 font-bold text-xs uppercase text-blue-600">Cambiar Contraseña (opcional)</label>
             <input type="text" value={editPass} onChange={e => setEditPass(e.target.value)} placeholder="Dejar vacío para mantener actual" className={inputCls} />
           </div>
-          <div className="flex items-center gap-2 pt-2">
-            <input 
-              type="checkbox" 
-              id="spec-active" 
-              checked={editingSpec?.active || false} 
-              onChange={e => setEditingSpec(p => p ? { ...p, active: e.target.checked } : null)} 
-              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
-            />
-            <label htmlFor="spec-active" className="text-sm font-bold text-slate-700 underline underline-offset-4 decoration-blue-100">Cuenta Activa</label>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block mb-1 text-slate-700 font-bold text-xs uppercase text-blue-600">Turno</label>
+              <select value={editingSpec?.shift || "Matutino"} onChange={e => setEditingSpec(p => p ? { ...p, shift: e.target.value } : null)} className={inputCls}>
+                <option value="Matutino">Turno Matutino</option>
+                <option value="Vespertino">Turno Vespertino</option>
+              </select>
+            </div>
+            <div>
+              <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Cuenta Activa</label>
+              <div className="flex items-center gap-2 h-[46px]">
+                <input 
+                  type="checkbox" 
+                  id="spec-active" 
+                  checked={editingSpec?.active || false} 
+                  onChange={e => setEditingSpec(p => p ? { ...p, active: e.target.checked } : null)} 
+                  className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+                />
+                <label htmlFor="spec-active" className="text-sm font-bold text-slate-600">Habilitado</label>
+              </div>
+            </div>
           </div>
           <div className="pt-4 flex gap-3">
             <Btn variant="ghost" onClick={() => setEditingSpec(null)} className="flex-1">Cancelar</Btn>
