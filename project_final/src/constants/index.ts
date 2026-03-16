@@ -22,3 +22,14 @@ export const STATUS_BADGE_CONFIG: Record<string, { cls: string }> = {
   Completada: { cls: "bg-[#dcfce7] text-[#16A34A]" },
   Cancelada: { cls: "bg-[#fef2f2] text-[#dc2626]" },
 };
+
+export const CAREERS = [
+  "Ingeniería Ambiental",
+  "Ingeniería en Gestión Empresarial",
+  "Ing. Mecatrónica",
+  "Ing. Electrónica",
+  "Ing. Electromecánica",
+  "Ing. Industrial",
+  "Ing. en Sistemas Computacionales",
+  "Ing. en Semiconductores"
+];

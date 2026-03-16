@@ -21,7 +21,7 @@ import {
   StoreContextType, AuthContextType
 } from "../types";
 import {
-  DEPT_CONFIG, DEPT_REASONS, DAY_NAMES, DAYS_FULL, STATUS_BADGE_CONFIG
+  DEPT_CONFIG, DEPT_REASONS, DAY_NAMES, DAYS_FULL, STATUS_BADGE_CONFIG, CAREERS
 } from "../constants";
 import {
   SEED_USERS, SEED_SPECIALISTS, SEED_APPOINTMENTS, SEED_EVENTS, SEED_RESOURCES,
@@ -464,7 +464,17 @@ function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void }) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block mb-1.5 text-slate-700 text-sm font-semibold ml-1">Carrera</label>
-                    <input type="text" value={form.carrera} onChange={e => set("carrera", e.target.value)} placeholder="Ej. Arquitectura" className={`${inputCls} border-emerald-200 focus:border-emerald-600 focus:bg-white`} />
+                    <select 
+                      value={form.carrera} 
+                      onChange={e => set("carrera", e.target.value)} 
+                      required
+                      className={`${inputCls} border-emerald-200 focus:border-emerald-600 focus:bg-white appearance-none cursor-pointer`}
+                    >
+                      <option value="" disabled>Selecciona tu carrera</option>
+                      {CAREERS.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block mb-1.5 text-slate-700 text-sm font-semibold ml-1">Número de control</label>
@@ -2228,10 +2238,41 @@ function AdminDashboard() {
       canceladas: list.filter(a => a.status === "Cancelada").length,
     };
 
+    // Calculate detailed stats for the filtered list
+    const motivosMap: Record<string, number> = {};
+    const carreraMap: Record<string, number> = {};
+    const modalidadMap: Record<string, number> = { "Presencial": 0, "Virtual": 0 };
+
+    list.forEach(a => {
+      // Motivos
+      const m = a.motivo || "Consulta General";
+      motivosMap[m] = (motivosMap[m] || 0) + 1;
+      
+      // Modalidad
+      if (a.modality === "Virtual") modalidadMap["Virtual"]++;
+      else modalidadMap["Presencial"]++;
+    });
+
+    // For careers, we need to map via users if available, or just skip if not easy.
+    // Since we have users loaded in StoreContext, we can try to map studentId to career.
+    list.forEach(a => {
+      const student = users.find(u => u.id === a.studentId);
+      const c = student?.carrera || "No especificada";
+      carreraMap[c] = (carreraMap[c] || 0) + 1;
+    });
+
+    const topMotivos = Object.entries(motivosMap)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5);
+
+    const careerStats = Object.entries(carreraMap)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 10);
+
     // Summary table
     doc.setFontSize(12);
     doc.setTextColor(30, 41, 59);
-    doc.text("Resumen de Estadísticas", 20, 45);
+    doc.text("Resumen General", 20, 45);
     
     autoTable(doc, {
       startY: 50,
@@ -2250,41 +2291,65 @@ function AdminDashboard() {
 
     let currentY = (doc as any).lastAutoTable.finalY + 15;
 
-    // Charts inclusion (only if activeTab is estadisticas or we can capture them)
-    // NOTE: This assumes charts are mounted in the DOM. For a more robust solution,
-    // we would render hidden charts or ensure they are visible.
+    // Detailed Stats Tables (Replacing visual charts if capture fails or providing extra data)
+    doc.text("Desglose Estadístico", 20, currentY);
+    currentY += 5;
+
+    autoTable(doc, {
+      startY: currentY,
+      head: [["Motivos más frecuentes", "Citas"]],
+      body: topMotivos,
+      theme: "striped",
+      headStyles: { fillColor: [71, 85, 105] },
+      margin: { left: 20, right: 105 }
+    });
+
+    autoTable(doc, {
+      startY: currentY,
+      head: [["Modalidad", "Citas"]],
+      body: Object.entries(modalidadMap),
+      theme: "striped",
+      headStyles: { fillColor: [71, 85, 105] },
+      margin: { left: 110, right: 20 }
+    });
+
+    currentY = Math.max((doc as any).lastAutoTable.finalY, currentY) + 15;
+
+    // Charts inclusion
     const addChartToDoc = async (ref: React.RefObject<HTMLDivElement | null>, title: string, y: number) => {
       if (ref.current) {
         try {
           const canvas = await html2canvas(ref.current, { scale: 2 });
           const imgData = canvas.toDataURL("image/png");
+          // Check if we need a new page
+          if (y + 100 > 280) {
+            doc.addPage();
+            y = 20;
+          }
           doc.setFontSize(12);
+          doc.setTextColor(30, 41, 59);
           doc.text(title, 20, y);
           doc.addImage(imgData, "PNG", 20, y + 5, 170, 85);
           return y + 100;
-        } catch (e) { console.error("Error capturing chart", e); return y; }
+        } catch (e) { 
+          console.error("Error capturing chart", e); 
+          return y; 
+        }
       }
       return y;
     };
 
-    if (activeTab === "estadisticas") {
-      doc.addPage();
-      doc.text("Análisis Visual de Datos", 105, 15, { align: "center" });
-      currentY = 25;
+    doc.addPage();
+    doc.setFontSize(14);
+    doc.text("Análisis Visual", 105, 15, { align: "center" });
+    currentY = 25;
 
-      currentY = await addChartToDoc(chartMonthlyRef, "Tendencias Mensuales", currentY);
-      currentY = await addChartToDoc(chartMotivosRef, "Distribución de Motivos", currentY);
-      
-      doc.addPage();
-      currentY = 15;
-      currentY = await addChartToDoc(chartModalidadRef, "Modalidad de Atención", currentY);
-      currentY = await addChartToDoc(chartCarreraRef, "Distribución por Carrera", currentY);
-    } else {
-      doc.setFontSize(9);
-      doc.setTextColor(100, 116, 139);
-      doc.text("* Cambie a la pestaña de 'Estadísticas' para incluir gráficas en el reporte.", 20, currentY);
-      currentY += 10;
-    }
+    // We use the hidden chart container refs
+    currentY = await addChartToDoc(chartMonthlyRef, "Tendencias Mensuales", currentY);
+    currentY = await addChartToDoc(chartMotivosRef, "Distribución de Motivos", currentY);
+    
+    currentY = await addChartToDoc(chartModalidadRef, "Modalidad de Atención", currentY);
+    currentY = await addChartToDoc(chartCarreraRef, "Distribución por Carrera", currentY);
 
     doc.addPage();
     doc.setFontSize(12);
@@ -2543,7 +2608,7 @@ function AdminDashboard() {
               <div className="space-y-6">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Monthly Trends */}
-                  <div ref={chartMonthlyRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Citas por Mes y Facultad</h4>
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={charts.monthly} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -2559,7 +2624,7 @@ function AdminDashboard() {
                   </div>
 
                   {/* Top Reasons */}
-                  <div ref={chartMotivosRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Motivos Frecuentes</h4>
                     <ResponsiveContainer width="100%" height={300}>
                       <PieChart>
@@ -2574,7 +2639,7 @@ function AdminDashboard() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Modality */}
-                  <div ref={chartModalidadRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Modalidad de Atención</h4>
                     <ResponsiveContainer width="100%" height={260}>
                       <PieChart>
@@ -2587,7 +2652,7 @@ function AdminDashboard() {
                   </div>
 
                   {/* By Career */}
-                  <div ref={chartCarreraRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Distribución por Carrera</h4>
                     <ResponsiveContainer width="100%" height={260}>
                       <BarChart data={charts.carrera} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
@@ -2834,6 +2899,62 @@ function AdminDashboard() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Hidden container for PDF chart capture */}
+      <div style={{ position: 'fixed', left: '-9999px', top: '-9999px', width: '1200px', pointerEvents: 'none' }}>
+        <div ref={chartMonthlyRef} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Citas por Mes y Facultad</h4>
+          <div style={{ width: '900px', height: '400px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={charts.monthly} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Bar dataKey="Psicología" fill="#2563EB" />
+                <Bar dataKey="Tutorías" fill="#16A34A" />
+                <Bar dataKey="Nutrición" fill="#EA580C" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        <div ref={chartMotivosRef} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Motivos Frecuentes</h4>
+          <div style={{ width: '900px', height: '400px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={charts.motivos} cx="50%" cy="50%" outerRadius={150} innerRadius={80} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `}>
+                  {charts.motivos.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        <div ref={chartModalidadRef} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Modalidad de Atención</h4>
+          <div style={{ width: '900px', height: '400px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={charts.modalidad} cx="50%" cy="50%" innerRadius={100} outerRadius={150} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `}>
+                  <Cell fill="#3b82f6" /><Cell fill="#10b981" />
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        <div ref={chartCarreraRef} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Distribución por Carrera</h4>
+          <div style={{ width: '900px', height: '500px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={charts.carrera} layout="vertical" margin={{ top: 0, right: 50, left: 50, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" />
+                <YAxis dataKey="name" type="category" width={150} />
+                <Bar dataKey="value" fill="#8b5cf6" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
 
