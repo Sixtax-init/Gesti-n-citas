@@ -11,19 +11,6 @@ Gesti-n-citas/
 ├── project_final/   # Frontend → React + Vite + TypeScript
 └── server/          # Backend  → Node.js + Express + Prisma + SQLite
 ```
-
----
-
-## 👥 Usuarios de Prueba
-
-| Rol          | Email                          | Contraseña  |
-|--------------|--------------------------------|-------------|
-| Admin        | admin@instituto.edu.mx         | `admin123`  |
-| Alumno       | alumno@instituto.edu.mx        | `alumno123` |
-| Psicólogo    | psicologo@instituto.edu.mx     | `esp123`    |
-| Tutora       | tutor@instituto.edu.mx         | `esp123`    |
-| Nutriólogo   | nutriologo@instituto.edu.mx    | `esp123`    |
-
 ---
 
 ## 🚀 Puesta en Marcha
