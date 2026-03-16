@@ -1,10 +1,43 @@
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { AuthContextType, User } from "../types";
 
 export const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const restoreSession = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('http://localhost:3000/api/auth/me', {
+        headers: { 
+          'Authorization': `Bearer ${token}` 
+        }
+      });
+
+      if (res.ok) {
+        const userData = await res.json();
+        setUser(userData);
+      } else {
+        localStorage.removeItem('token');
+      }
+    } catch (e) {
+      console.error("Session restoration failed:", e);
+      localStorage.removeItem('token');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    restoreSession();
+  }, [restoreSession]);
 
   const login = useCallback(async (email: string, password: string) => {
     try {
@@ -53,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

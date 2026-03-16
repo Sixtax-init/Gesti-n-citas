@@ -12,6 +12,9 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from "recharts";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import html2canvas from "html2canvas";
 
 import {
   User, Specialist, Appointment, AppEvent, Resource, AppNotification,
@@ -27,6 +30,8 @@ import {
 } from "../data/mockData";
 import { useStore } from "../context/StoreContext";
 import { useAuth } from "../context/AuthContext";
+
+const API_BASE = 'http://localhost:3000';
 
 function NotifIcon({ type }: { type: string }) {
   const props = { className: "w-4 h-4" };
@@ -158,7 +163,7 @@ function Tabs({ tabs, defaultTab, children }: { tabs: { key: string; label: stri
   );
 }
 
-function Modal({ open, onClose, title, subtitle, children, maxWidth = "max-w-xl" }: { open: boolean; onClose: () => void; title: string; subtitle?: string; children: React.ReactNode; maxWidth?: string }) {
+function Modal({ open, onClose, title, subtitle, children, maxWidth = "max-w-xl" }: { open: boolean; onClose: () => void; title: string; subtitle?: React.ReactNode; children: React.ReactNode; maxWidth?: string }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -722,7 +727,7 @@ function StudentDashboard() {
 
   const appointments = getAppointments({ studentId: user?.id });
   const proximas = appointments.filter(a => a.status === "Pendiente" || a.status === "Confirmada");
-  const { pendientes, confirmadas, completadas } = getStats();
+  const { summary: { pendientes, confirmadas, completadas } } = getStats();
   const historial = appointments.filter(a => a.status === "Completada" || a.status === "Cancelada");
 
   const stats = [
@@ -1086,20 +1091,35 @@ function StudentDashboard() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <label className="block text-slate-900 font-bold text-sm"><Users className="w-4 h-4 inline mr-1.5 text-blue-600" />Especialista preferido</label>
-                    <div className="space-y-3">
-                      {deptSpecialists.map(sp => (
-                        <button key={sp.id} onClick={() => setSelSpecId(sp.id)}
-                          className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 transition-all cursor-pointer text-left ${selSpecId === sp.id ? "border-blue-600 bg-blue-50/50" : "border-slate-100 hover:border-blue-200 hover:bg-slate-50"}`}>
-                          <Avatar name={sp.name} size="sm" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-slate-900 font-semibold text-sm truncate">{sp.name}</p>
-                            <p className="text-slate-500 text-xs truncate">{sp.email}</p>
+                    <div className="space-y-6">
+                      {["Matutino", "Vespertino"].map(shift => {
+                        const specsInShift = deptSpecialists.filter(s => (s.shift || "Matutino") === shift);
+                        if (specsInShift.length === 0) return null;
+                        
+                        return (
+                          <div key={shift} className="space-y-3">
+                            <h5 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
+                              <div className={`w-1.5 h-1.5 rounded-full ${shift === 'Matutino' ? 'bg-amber-400' : 'bg-indigo-400'}`} />
+                              Turno {shift}
+                            </h5>
+                            <div className="space-y-2">
+                              {specsInShift.map(sp => (
+                                <button key={sp.id} onClick={() => setSelSpecId(sp.id)}
+                                  className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 transition-all cursor-pointer text-left ${selSpecId === sp.id ? "border-blue-600 bg-blue-50/50" : "border-slate-100 hover:border-blue-200 hover:bg-slate-50"}`}>
+                                  <Avatar name={sp.name} size="sm" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-slate-900 font-semibold text-sm truncate">{sp.name}</p>
+                                    <p className="text-slate-500 text-xs truncate">{sp.email}</p>
+                                  </div>
+                                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${selSpecId === sp.id ? "border-blue-600" : "border-slate-200"}`}>
+                                    {selSpecId === sp.id && <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${selSpecId === sp.id ? "border-blue-600" : "border-slate-200"}`}>
-                            {selSpecId === sp.id && <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
-                          </div>
-                        </button>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -1461,21 +1481,42 @@ function SpecialistDashboard() {
   const [newWeek, setNewWeek] = useState<number | string>("both");
   const [newStart, setNewStart] = useState("09:00");
   const [newEnd, setNewEnd] = useState("13:00");
+  const [selectedBaseDate, setSelectedBaseDate] = useState<string | undefined>(undefined);
 
   const openEditSlot = (slot: any) => {
     setEditingSlotId(slot.id);
     setNewDay(slot.dayOfWeek);
-    setNewWeek(slot.week === undefined ? "both" : slot.week);
+    setNewWeek(slot.week === null || slot.week === undefined ? "both" : slot.week);
     setNewStart(slot.startTime);
     setNewEnd(slot.endTime);
+    setSelectedBaseDate(slot.specificDate || undefined);
     setShowAddSched(true);
+  };
+
+  const handleOpenAddSlot = (day: number, week: number, dateStr: string) => {
+    setEditingSlotId(null);
+    setNewDay(day);
+    setNewWeek("date"); // Nueva opción para "Solo este día"
+    setNewStart("09:00");
+    setNewEnd("13:00");
+    setSelectedBaseDate(dateStr);
+    setShowAddSched(true);
+  };
+
+  const isPastDay = (date: Date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d < today;
   };
 
   const handleAddSched = () => {
     if (!spec) return;
 
     const dayInt = parseInt(String(newDay));
-    const weekVal = newWeek === "both" ? undefined : parseInt(String(newWeek));
+    const isSpecificDate = newWeek === "date";
+    const weekVal = (newWeek === "both" || newWeek === "date") ? undefined : parseInt(String(newWeek));
 
     // Validar solapamiento
     const hasOverlap = spec.schedule.some(s => {
@@ -1486,9 +1527,10 @@ function SpecialistDashboard() {
       // Prisma returns null if field is not set, while frontend uses undefined or 'both'
       const sWeek = s.week === null ? undefined : s.week;
       const weekConflict = sWeek === undefined || weekVal === undefined || sWeek === weekVal;
+      const dateConflict = isSpecificDate ? s.specificDate === selectedBaseDate : (s.specificDate === null || s.specificDate === undefined);
       const timeOverlap = newStart < s.endTime && newEnd > s.startTime;
 
-      return sameDay && weekConflict && timeOverlap;
+      return sameDay && weekConflict && dateConflict && timeOverlap;
     });
 
     if (hasOverlap) {
@@ -1505,7 +1547,8 @@ function SpecialistDashboard() {
       startTime: newStart,
       endTime: newEnd,
       available: true,
-      week: weekVal
+      week: weekVal,
+      specificDate: isSpecificDate ? selectedBaseDate : undefined
     });
     setShowAddSched(false);
     setEditingSlotId(null);
@@ -1739,14 +1782,20 @@ function SpecialistDashboard() {
                   <p className="text-slate-500 font-medium mt-1">Hoy es <span className="text-blue-600 font-bold">{new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</span></p>
                   <p className="text-rose-500 text-xs font-bold mt-2 uppercase tracking-tight flex items-center gap-1.5"><Info className="w-3.5 h-3.5" /> Se recomienda dar de alta horarios con 1 semana de anticipación.</p>
                 </div>
-                <Btn onClick={() => setShowAddSched(true)} className="bg-blue-600 text-white shadow-blue-600/20"><Plus className="w-4 h-4 mr-1.5" /> Agregar Horario</Btn>
+                <div className="flex items-center gap-3 px-5 py-3 bg-blue-50 border border-blue-100 rounded-2xl animate-in fade-in slide-in-from-right-4 duration-500">
+                  <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0 shadow-sm">
+                    <Plus className="w-4 h-4 text-white" />
+                  </div>
+                  <p className="text-blue-800 text-sm font-bold leading-tight">Haz clic en un día del calendario <br/><span className="text-blue-600 font-black uppercase text-[10px] tracking-widest">Para agregar un Horario</span></p>
+                </div>
               </div>
 
               {[0, 1].map(weekOffset => {
                 const today = new Date();
-                const currentDay = today.getDay() === 0 ? 7 : today.getDay();
+                // Si es domingo (0), el lunes actual es mañana. Si no, calcular el lunes de esta semana.
+                const dayShift = today.getDay() === 0 ? 1 : 1 - today.getDay();
                 const mondayOfCurrentWeek = new Date(today);
-                mondayOfCurrentWeek.setDate(today.getDate() - (currentDay - 1) + (weekOffset * 7));
+                mondayOfCurrentWeek.setDate(today.getDate() + dayShift + (weekOffset * 7));
 
                 return (
                   <div key={weekOffset} className={weekOffset === 1 ? "mt-8" : ""}>
@@ -1760,14 +1809,22 @@ function SpecialistDashboard() {
                     <div className="flex overflow-x-auto md:grid md:grid-cols-5 gap-3 sm:gap-4 pb-4 md:pb-0 scroll-smooth no-scrollbar snap-x">
                       {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"].map((day, i) => {
                         const dow = i + 1;
-                        const daySlots = spec.schedule.filter(s => s.dayOfWeek === dow && (s.week === undefined || s.week === weekOffset));
                         const dateObj = new Date(mondayOfCurrentWeek);
                         dateObj.setDate(mondayOfCurrentWeek.getDate() + i);
+                        const isoDate = dateObj.toISOString().split("T")[0];
+                        const daySlots = spec.schedule.filter(s => 
+                          (s.specificDate === isoDate) || 
+                          (s.specificDate === null && s.dayOfWeek === dow && (s.week === undefined || s.week === null || s.week === weekOffset))
+                        );
                         const dateStr = `${dateObj.getDate()} ${dateObj.toLocaleDateString("es-MX", { month: "short" })}`.replace(".", "");
                         const isPast = dateObj < new Date(new Date().setHours(0, 0, 0, 0));
 
                         return (
-                          <div key={`${weekOffset}-${day}`} className={`bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 min-h-[140px] sm:min-h-[160px] shadow-sm flex-shrink-0 w-[210px] sm:w-[240px] md:w-auto snap-start transition-all ${isPast ? "opacity-40" : ""}`}>
+                          <div 
+                            key={`${weekOffset}-${day}`} 
+                            onClick={() => !isPast && handleOpenAddSlot(dow, weekOffset, isoDate)}
+                            className={`bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 min-h-[140px] sm:min-h-[160px] shadow-sm flex-shrink-0 w-[210px] sm:w-[240px] md:w-auto snap-start transition-all ${isPast ? "opacity-40" : "cursor-pointer hover:border-blue-400 hover:ring-4 hover:ring-blue-400/5 hover:bg-white"}`}
+                          >
                             <div className="flex flex-col mb-3 sm:mb-4">
                               <p className="text-slate-900 font-bold uppercase tracking-wider text-[0.6rem] sm:text-xs">{day}</p>
                               <p className="text-indigo-600 font-black text-[0.55rem] sm:text-[0.65rem] uppercase">{dateStr}</p>
@@ -1779,8 +1836,8 @@ function SpecialistDashboard() {
                                     <span className="text-slate-700 font-bold text-[0.7rem] sm:text-sm tracking-tighter">{s.startTime}-{s.endTime}</span>
                                     {!isPast && (
                                       <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button onClick={() => openEditSlot(s)} className="text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg p-1 transition-colors cursor-pointer"><Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></button>
-                                        <button onClick={() => { removeScheduleSlot(spec.id, s.id); toast.success("Horario eliminado exitosamente."); }} className="text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg p-1 transition-colors cursor-pointer"><Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></button>
+                                        <button onClick={(e) => { e.stopPropagation(); openEditSlot(s); }} className="text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg p-1 transition-colors cursor-pointer"><Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></button>
+                                        <button onClick={(e) => { e.stopPropagation(); removeScheduleSlot(spec.id, s.id); toast.success("Horario eliminado exitosamente."); }} className="text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg p-1 transition-colors cursor-pointer"><Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></button>
                                       </div>
                                     )}
                                   </div>
@@ -1800,24 +1857,32 @@ function SpecialistDashboard() {
                 );
               })}
 
-              <Modal open={showAddSched} onClose={() => { setShowAddSched(false); setEditingSlotId(null); }} title={editingSlotId ? "Editar Horario" : "Agregar Horario"} subtitle={editingSlotId ? "Modifica los parámetros de este bloque de atención" : "Define un nuevo bloque de atención recurrente"} maxWidth="max-w-md">
+              <Modal open={showAddSched} onClose={() => { setShowAddSched(false); setEditingSlotId(null); }} title={editingSlotId ? "Editar Horario" : "Agregar Horario"} subtitle={editingSlotId ? "Modifica los parámetros de este bloque de atención" : (
+                <div className="flex items-center gap-2 text-blue-600 font-bold text-sm mt-1">
+                  <Calendar className="w-4 h-4" />
+                  <span>{DAYS_FULL[Number(newDay)]} • {newWeek === "both" ? "Ambas Semanas" : newWeek === 0 ? "Semana Actual" : "Próxima Semana"}</span>
+                </div>
+              )} maxWidth="max-w-md">
                 <div className="space-y-5">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block mb-2 text-slate-900 font-bold text-sm">Día</label>
-                      <select value={newDay} onChange={e => setNewDay(e.target.value)} className={inputCls}>
-                        {[1, 2, 3, 4, 5].map(d => <option key={d} value={d}>{DAYS_FULL[d]}</option>)}
-                      </select>
+                  {(editingSlotId) && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block mb-2 text-slate-900 font-bold text-sm">Día</label>
+                        <select value={newDay} onChange={e => setNewDay(e.target.value)} className={inputCls}>
+                          {[1, 2, 3, 4, 5].map(d => <option key={d} value={d}>{DAYS_FULL[d]}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block mb-2 text-slate-900 font-bold text-sm">Semana</label>
+                        <select value={newWeek} onChange={e => setNewWeek(e.target.value)} className={inputCls}>
+                          <option value="date">Solo este día ({selectedBaseDate})</option>
+                          <option value="both">Recursivo: Ambas Semanas</option>
+                          <option value="0">Recursivo: Semana Actual</option>
+                          <option value="1">Recursivo: Próxima Semana</option>
+                        </select>
+                      </div>
                     </div>
-                    <div>
-                      <label className="block mb-2 text-slate-900 font-bold text-sm">Semana</label>
-                      <select value={newWeek} onChange={e => setNewWeek(e.target.value)} className={inputCls}>
-                        <option value="both">Ambas Semanas</option>
-                        <option value="0">Semana Actual</option>
-                        <option value="1">Próxima Semana</option>
-                      </select>
-                    </div>
-                  </div>
+                  )}
                   <div className="grid grid-cols-2 gap-4">
                     <div><label className="block mb-2 text-slate-900 font-bold text-sm">Hora de Inicio</label><input type="time" value={newStart} onChange={e => setNewStart(e.target.value)} className={inputCls} /></div>
                     <div><label className="block mb-2 text-slate-900 font-bold text-sm">Hora de Fin</label><input type="time" value={newEnd} onChange={e => setNewEnd(e.target.value)} className={inputCls} /></div>
@@ -2026,7 +2091,7 @@ function AdminDashboard() {
   const [actionNotes, setActionNotes] = useState("");
 
   // New specialist
-  const [newName, setNewName] = useState(""), [newDept, setNewDept] = useState("Psicología"), [newEmail, setNewEmail] = useState(""), [newPass, setNewPass] = useState(""), [newSched, setNewSched] = useState("");
+  const [newName, setNewName] = useState(""), [newDept, setNewDept] = useState("Psicología"), [newEmail, setNewEmail] = useState(""), [newPass, setNewPass] = useState(""), [newSched, setNewSched] = useState(""), [newShift, setNewShift] = useState("Matutino");
   const [editingSpec, setEditingSpec] = useState<Specialist | null>(null);
   const [editPass, setEditPass] = useState("");
 
@@ -2036,7 +2101,16 @@ function AdminDashboard() {
   // New content (Resource)
   const [ctitle, setCtitle] = useState(""), [cdesc, setCdesc] = useState(""), [ctype, setCtype] = useState("video"), [curl, setCurl] = useState(""), [cimgUrl, setCimgUrl] = useState(""), [cdept, setCdept] = useState("Psicología");
 
-  const stats = getStats();
+  // Chart refs for PDF
+  const chartMonthlyRef = useRef<HTMLDivElement>(null);
+  const chartMotivosRef = useRef<HTMLDivElement>(null);
+  const chartModalidadRef = useRef<HTMLDivElement>(null);
+  const chartCarreraRef = useRef<HTMLDivElement>(null);
+
+  const fullStats = getStats();
+  const summary = fullStats.summary;
+  const charts = fullStats.charts;
+
   const allAppts = getAppointments();
   const filteredAppts = allAppts.filter(a => {
     if (deptFilter !== "Todos" && a.department !== deptFilter) return false;
@@ -2056,7 +2130,7 @@ function AdminDashboard() {
 
   const handleAddSpec = async () => {
     if (!newName || !newEmail || !newPass) { toast.error("Nombre, correo y contraseña son obligatorios"); return; }
-    await addSpecialist({ name: newName, department: newDept, email: newEmail, password: newPass });
+    await addSpecialist({ name: newName, department: newDept, email: newEmail, password: newPass, shift: newShift });
     toast.success(`${newName} registrado correctamente`);
     setNewName(""); setNewEmail(""); setNewPass(""); setNewSched("");
   };
@@ -2092,9 +2166,9 @@ function AdminDashboard() {
       date: evDate,
       time: evTime,
       type: evType,
-      imageUrl: finalImg,
+      imageUrl: evImg || undefined,
       registrationUrl: evType === "taller" ? evRegUrl : undefined
-    });
+    }, selectedEventImg || undefined);
 
     toast.success("Evento publicado exitosamente");
     setEvTitle(""); setEvDesc(""); setEvDate(""); setEvTime(""); setEvImg(""); setEvRegUrl(""); setSelectedEventImg(null);
@@ -2116,13 +2190,129 @@ function AdminDashboard() {
       type: ctype,
       url: curl || "#",
       imageUrl: cimgUrl || undefined,
-      department: cdept,
-      fileUrl: finalFileUrl,
-      fileName: selectedFile?.name
-    });
+      department: cdept
+    }, selectedFile || undefined);
 
     toast.success("Material educativo publicado");
     setCtitle(""); setCdesc(""); setCurl(""); setCimgUrl(""); setSelectedFile(null);
+  };
+
+  const generatePDFReport = async (deptReport: string) => {
+    const doc = new jsPDF();
+    const today = new Date().toLocaleDateString("es-MX");
+    
+    // Header
+    doc.setFontSize(22);
+    doc.setTextColor(30, 41, 59);
+    doc.text("Sistema de Gestión de Citas", 105, 15, { align: "center" });
+    doc.setFontSize(14);
+    doc.text(`Reporte Institucional: ${deptReport}`, 105, 23, { align: "center" });
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Fecha de generación: ${today}`, 105, 29, { align: "center" });
+    
+    // Line separator
+    doc.setDrawColor(226, 232, 240);
+    doc.line(20, 35, 190, 35);
+
+    // Filter data
+    const list = deptReport === "Reporte Global" 
+      ? allAppts 
+      : allAppts.filter(a => a.department === deptReport);
+
+    const statsDetail = {
+      total: list.length,
+      confirmadas: list.filter(a => a.status === "Confirmada").length,
+      completadas: list.filter(a => a.status === "Completada").length,
+      pendientes: list.filter(a => a.status === "Pendiente").length,
+      canceladas: list.filter(a => a.status === "Cancelada").length,
+    };
+
+    // Summary table
+    doc.setFontSize(12);
+    doc.setTextColor(30, 41, 59);
+    doc.text("Resumen de Estadísticas", 20, 45);
+    
+    autoTable(doc, {
+      startY: 50,
+      head: [["Métrica", "Cantidad"]],
+      body: [
+        ["Total de Citas", statsDetail.total],
+        ["Confirmadas", statsDetail.confirmadas],
+        ["Completadas", statsDetail.completadas],
+        ["Pendientes", statsDetail.pendientes],
+        ["Canceladas", statsDetail.canceladas],
+      ],
+      theme: "grid",
+      headStyles: { fillColor: [59, 130, 246] },
+      margin: { left: 20, right: 20 }
+    });
+
+    let currentY = (doc as any).lastAutoTable.finalY + 15;
+
+    // Charts inclusion (only if activeTab is estadisticas or we can capture them)
+    // NOTE: This assumes charts are mounted in the DOM. For a more robust solution,
+    // we would render hidden charts or ensure they are visible.
+    const addChartToDoc = async (ref: React.RefObject<HTMLDivElement | null>, title: string, y: number) => {
+      if (ref.current) {
+        try {
+          const canvas = await html2canvas(ref.current, { scale: 2 });
+          const imgData = canvas.toDataURL("image/png");
+          doc.setFontSize(12);
+          doc.text(title, 20, y);
+          doc.addImage(imgData, "PNG", 20, y + 5, 170, 85);
+          return y + 100;
+        } catch (e) { console.error("Error capturing chart", e); return y; }
+      }
+      return y;
+    };
+
+    if (activeTab === "estadisticas") {
+      doc.addPage();
+      doc.text("Análisis Visual de Datos", 105, 15, { align: "center" });
+      currentY = 25;
+
+      currentY = await addChartToDoc(chartMonthlyRef, "Tendencias Mensuales", currentY);
+      currentY = await addChartToDoc(chartMotivosRef, "Distribución de Motivos", currentY);
+      
+      doc.addPage();
+      currentY = 15;
+      currentY = await addChartToDoc(chartModalidadRef, "Modalidad de Atención", currentY);
+      currentY = await addChartToDoc(chartCarreraRef, "Distribución por Carrera", currentY);
+    } else {
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text("* Cambie a la pestaña de 'Estadísticas' para incluir gráficas en el reporte.", 20, currentY);
+      currentY += 10;
+    }
+
+    doc.addPage();
+    doc.setFontSize(12);
+    doc.setTextColor(30, 41, 59);
+    doc.text("Desglose Detallado de Citas", 20, 15);
+    
+    autoTable(doc, {
+      startY: 20,
+      head: [["Alumno", "Especialista", "Fecha", "Hora", "Estado"]],
+      body: list.slice(0, 100).map(a => [
+        a.studentName,
+        a.specialistName,
+        a.date,
+        a.time,
+        a.status
+      ]),
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [30, 41, 59] },
+      margin: { left: 20, right: 20 }
+    });
+
+    if (list.length > 100) {
+      doc.setFontSize(8);
+      doc.text(`* Mostrando los primeros 100 registros de ${list.length} totales.`, 20, (doc as any).lastAutoTable.finalY + 10);
+    }
+
+    doc.save(`reporte_${deptReport.replace(/\s+/g, '_').toLowerCase()}.pdf`);
+    toast.success("Reporte generado con éxito.");
   };
 
   const inputCls = "w-full px-4 py-3 rounded-xl border border-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 bg-slate-50/50 hover:bg-slate-50 transition-colors shadow-sm text-slate-700 text-sm";
@@ -2137,16 +2327,18 @@ function AdminDashboard() {
     { key: "eventos", label: "Publicar Evento", icon: Megaphone }
   ];
 
+
+
   const adminStats = [
-    { label: "Total Institucional", value: stats.total, icon: BarChart3, gradient: "from-slate-700 to-slate-900 shadow-slate-900/20" },
-    { label: "Pendientes Global", value: stats.pendientes, icon: Clock, gradient: "from-amber-500 to-amber-600 shadow-amber-500/20" },
-    { label: "Confirmadas", value: stats.confirmadas, icon: CalendarCheck, gradient: "from-blue-600 to-indigo-600 shadow-blue-600/20" },
-    { label: "Completadas", value: stats.completadas, icon: CheckCircle2, gradient: "from-emerald-500 to-emerald-600 shadow-emerald-500/20" },
-    { label: "Canceladas / Faltas", value: stats.canceladas, icon: XCircle, gradient: "from-rose-500 to-rose-600 shadow-rose-500/20" }
+    { label: "Total Institucional", value: summary.total, icon: BarChart3, gradient: "from-slate-700 to-slate-900 shadow-slate-900/20" },
+    { label: "Pendientes Global", value: summary.pendientes, icon: Clock, gradient: "from-amber-500 to-amber-600 shadow-amber-500/20" },
+    { label: "Confirmadas", value: summary.confirmadas, icon: CalendarCheck, gradient: "from-blue-600 to-indigo-600 shadow-blue-600/20" },
+    { label: "Completadas", value: summary.completadas, icon: CheckCircle2, gradient: "from-emerald-500 to-emerald-600 shadow-emerald-500/20" },
+    { label: "Canceladas / Faltas", value: summary.canceladas, icon: XCircle, gradient: "from-rose-500 to-rose-600 shadow-rose-500/20" }
   ];
 
   return (
-    <AppShell sidebar={{ tabs: sidebarTabs, active: activeTab, onSelect: setActiveTab, badges: { citas: stats.pendientes } }} role="admin" userName={user?.name} userEmail={user?.email} userDept="Administración Central">
+    <AppShell sidebar={{ tabs: sidebarTabs, active: activeTab, onSelect: setActiveTab, badges: { citas: summary.pendientes } }} role="admin" userName={user?.name} userEmail={user?.email} userDept="Administración Central">
       <div className="space-y-8 max-w-7xl mx-auto w-full pb-12">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Panel de Administración</h1>
@@ -2166,7 +2358,7 @@ function AdminDashboard() {
                 <div className={`w-12 h-12 ${cfg.bg} rounded-xl flex items-center justify-center`}><cfg.icon className="w-5 h-5" style={{ color: cfg.color }} /></div>
                 <div>
                   <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">{name}</p>
-                  <p className="text-slate-900 text-2xl font-black mt-0.5 leading-none">{stats.byDept[name]} <span className="text-slate-400 font-medium text-sm">citas</span></p>
+                  <p className="text-slate-900 text-2xl font-black mt-0.5 leading-none">{summary.byDept[name]} <span className="text-slate-400 font-medium text-sm">citas</span></p>
                 </div>
               </div>
               <TrendingUp className="w-5 h-5 text-slate-300 group-hover:text-blue-500 transition-colors" />
@@ -2277,6 +2469,13 @@ function AdminDashboard() {
                             <span className="text-slate-400 text-xs">•</span>
                             <span className="text-slate-500 text-xs font-medium truncate">{esp.email}</span>
                           </div>
+                          {esp.shift && (
+                            <div className="flex items-center gap-1 mt-2">
+                              <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-widest border border-blue-100 flex items-center gap-1">
+                                <Clock3 className="w-2.5 h-2.5" /> {esp.shift}
+                              </span>
+                            </div>
+                          )}
                         </div>
                         <span className={`px-2.5 py-1 rounded-full ${esp.active ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-100 text-slate-400 border-slate-200'} font-bold text-[0.65rem] uppercase tracking-wider shrink-0 border`}>
                           {esp.active ? 'Activo' : 'Inactivo'}
@@ -2319,8 +2518,15 @@ function AdminDashboard() {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div><label className="block mb-2 text-slate-900 font-bold text-sm">Contraseña temporal</label><input type="text" value={newPass} onChange={e => setNewPass(e.target.value)} placeholder="Contraseña inicial" className={inputCls} /></div>
-                      <div><label className="block mb-2 text-slate-900 font-bold text-sm">Horarios (opcional)</label><input type="text" value={newSched} onChange={e => setNewSched(e.target.value)} placeholder="Ej. Lun-Vie 09:00-14:00" className={inputCls} /></div>
+                      <div>
+                        <label className="block mb-2 text-slate-900 font-bold text-sm">Turno de Atención</label>
+                        <select value={newShift} onChange={e => setNewShift(e.target.value)} className={inputCls}>
+                          <option value="Matutino">Turno Matutino</option>
+                          <option value="Vespertino">Turno Vespertino</option>
+                        </select>
+                      </div>
                     </div>
+                    <div><label className="block mb-2 text-slate-900 font-bold text-sm">Horarios presenciales (opcional)</label><input type="text" value={newSched} onChange={e => setNewSched(e.target.value)} placeholder="Ej. Lun-Vie 09:00-14:00" className={inputCls} /></div>
 
                     <div className="pt-2"><Btn onClick={handleAddSpec} size="lg" className="w-full bg-blue-600 text-white shadow-blue-600/20"><Plus className="w-5 h-5 mr-2" /> Registrar Especialista</Btn></div>
                   </div>
@@ -2337,10 +2543,10 @@ function AdminDashboard() {
               <div className="space-y-6">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Monthly Trends */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div ref={chartMonthlyRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Citas por Mes y Facultad</h4>
                     <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={CHART_MONTHLY} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <BarChart data={charts.monthly} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                         <XAxis dataKey="month" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} dy={10} />
                         <YAxis tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
@@ -2353,12 +2559,12 @@ function AdminDashboard() {
                   </div>
 
                   {/* Top Reasons */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div ref={chartMotivosRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Motivos Frecuentes</h4>
                     <ResponsiveContainer width="100%" height={300}>
                       <PieChart>
-                        <Pie data={CHART_MOTIVOS} cx="50%" cy="50%" outerRadius={100} innerRadius={60} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={{ stroke: '#cbd5e1' }}>
-                          {CHART_MOTIVOS.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                        <Pie data={charts.motivos} cx="50%" cy="50%" outerRadius={100} innerRadius={60} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={{ stroke: '#cbd5e1' }}>
+                          {charts.motivos.map((_, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                         </Pie>
                         <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
                       </PieChart>
@@ -2368,11 +2574,11 @@ function AdminDashboard() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Modality */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div ref={chartModalidadRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Modalidad de Atención</h4>
                     <ResponsiveContainer width="100%" height={260}>
                       <PieChart>
-                        <Pie data={CHART_MODALIDAD} cx="50%" cy="50%" innerRadius={70} outerRadius={100} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={false}>
+                        <Pie data={charts.modalidad} cx="50%" cy="50%" innerRadius={70} outerRadius={100} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={false}>
                           <Cell fill="#3b82f6" /><Cell fill="#10b981" />
                         </Pie>
                         <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
@@ -2381,10 +2587,10 @@ function AdminDashboard() {
                   </div>
 
                   {/* By Career */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                  <div ref={chartCarreraRef} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                     <h4 className="text-slate-900 font-bold mb-6 text-lg">Distribución por Carrera</h4>
                     <ResponsiveContainer width="100%" height={260}>
-                      <BarChart data={CHART_CARRERA} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
+                      <BarChart data={charts.carrera} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
                         <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
                         <YAxis dataKey="name" type="category" tick={{ fontSize: 11, fill: "#475569", fontWeight: 500 }} axisLine={false} tickLine={false} width={120} />
@@ -2417,7 +2623,7 @@ function AdminDashboard() {
                     <div className={`w-16 h-16 bg-gradient-to-br ${r.gradient} ${r.shadow} rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg group-hover:scale-110 transition-transform`}><r.icon className="w-8 h-8 text-white" /></div>
                     <h4 className="text-slate-900 font-bold text-lg mb-2">{r.label}</h4>
                     <p className="text-slate-500 text-xs font-medium mb-6 flex-1">Datos consolidados del mes en curso, demografía y efectividad.</p>
-                    <Btn onClick={() => toast.success(`Reporte de ${r.label} generado`)} variant="outline" className={`w-full text-${r.color}-600 hover:bg-${r.color}-50 hover:border-${r.color}-200`}><Download className="w-4 h-4 mr-2" /> PDF Export</Btn>
+                    <Btn onClick={() => generatePDFReport(r.label)} variant="outline" className={`w-full text-${r.color}-600 hover:bg-${r.color}-50 hover:border-${r.color}-200`}><Download className="w-4 h-4 mr-2" /> PDF Export</Btn>
                   </div>
                 ))}
               </div>
@@ -2547,7 +2753,12 @@ function AdminDashboard() {
                       <div key={ev.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                         {ev.imageUrl && <div className="h-32 bg-slate-100 overflow-hidden relative">
                           <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent z-10" />
-                          <img src={ev.imageUrl} alt={ev.title} className="w-full h-full object-cover relative z-0" onError={(e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).style.display = "none" }} />
+                          <img 
+                            src={ev.imageUrl.startsWith('http') ? ev.imageUrl : `${API_BASE}${ev.imageUrl}`} 
+                            alt={ev.title} 
+                            className="w-full h-full object-cover relative z-0" 
+                            onError={(e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).style.display = "none" }} 
+                          />
                           <div className="absolute bottom-3 left-3 z-20 flex items-center gap-2">
                             <span className={`px - 2 py - 0.5 rounded - md font - bold text - [0.65rem] uppercase tracking - wider shadow - sm ${ev.type === "conferencia" ? "bg-violet-500 text-white" : "bg-blue-500 text-white"} `}>{ev.type === "conferencia" ? "Conferencia" : "Taller"}</span>
                             <span className="px-2 py-0.5 rounded-md font-bold text-[0.65rem] uppercase tracking-wider bg-black/40 text-white backdrop-blur-md">{ev.department}</span>
@@ -2649,15 +2860,27 @@ function AdminDashboard() {
             <label className="block mb-1 text-slate-700 font-bold text-xs uppercase text-blue-600">Cambiar Contraseña (opcional)</label>
             <input type="text" value={editPass} onChange={e => setEditPass(e.target.value)} placeholder="Dejar vacío para mantener actual" className={inputCls} />
           </div>
-          <div className="flex items-center gap-2 pt-2">
-            <input 
-              type="checkbox" 
-              id="spec-active" 
-              checked={editingSpec?.active || false} 
-              onChange={e => setEditingSpec(p => p ? { ...p, active: e.target.checked } : null)} 
-              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
-            />
-            <label htmlFor="spec-active" className="text-sm font-bold text-slate-700 underline underline-offset-4 decoration-blue-100">Cuenta Activa</label>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block mb-1 text-slate-700 font-bold text-xs uppercase text-blue-600">Turno</label>
+              <select value={editingSpec?.shift || "Matutino"} onChange={e => setEditingSpec(p => p ? { ...p, shift: e.target.value } : null)} className={inputCls}>
+                <option value="Matutino">Turno Matutino</option>
+                <option value="Vespertino">Turno Vespertino</option>
+              </select>
+            </div>
+            <div>
+              <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Cuenta Activa</label>
+              <div className="flex items-center gap-2 h-[46px]">
+                <input 
+                  type="checkbox" 
+                  id="spec-active" 
+                  checked={editingSpec?.active || false} 
+                  onChange={e => setEditingSpec(p => p ? { ...p, active: e.target.checked } : null)} 
+                  className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+                />
+                <label htmlFor="spec-active" className="text-sm font-bold text-slate-600">Habilitado</label>
+              </div>
+            </div>
           </div>
           <div className="pt-4 flex gap-3">
             <Btn variant="ghost" onClick={() => setEditingSpec(null)} className="flex-1">Cancelar</Btn>
@@ -2687,8 +2910,19 @@ function AdminDashboard() {
 // APP ROUTER
 // ─────────────────────────────────────────────
 function AppRouter() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
   const [view, setView] = useState("login");
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-slate-500 font-bold animate-pulse">Iniciando sesión...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated || !user) {
     if (view === "register") return <RegisterForm onSwitchToLogin={() => setView("login")} />;

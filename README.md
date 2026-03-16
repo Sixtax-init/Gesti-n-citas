@@ -61,6 +61,9 @@ npx ts-node src/seed.ts
 
 # 7. Iniciar el servidor en modo desarrollo (puerto 3000)
 npm run dev
+
+# ⚠️ Actualización de la BD (Si hay cambios en el esquema)
+npx prisma migrate dev --name descripcion_del_cambio
 ```
 
 > ✅ El servidor queda corriendo en **http://localhost:3000**

@@ -3,6 +3,8 @@ import { prisma } from '../db';
 
 const router = Router();
 
+import { upload } from '../middleware/upload';
+
 // GET /api/resources
 router.get('/', async (req, res) => {
   try {
@@ -19,16 +21,33 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/resources
-router.post('/', async (req, res) => {
+router.post('/', upload.single('file'), async (req, res) => {
   try {
-    const { department, type, title, description, url, imageUrl, fileUrl, fileName } = req.body;
+    const { department, type, title, description, url, imageUrl } = req.body;
+    let fileUrl = req.body.fileUrl;
+    let fileName = req.body.fileName;
 
-    if (!title || !department || !url) {
-      return res.status(400).json({ error: 'title, department y url son requeridos' });
+    if (!title || !department) {
+      return res.status(400).json({ error: 'title y department son requeridos' });
+    }
+
+    // Si se subió un archivo vía multer
+    if (req.file) {
+      fileUrl = `/uploads/${req.file.filename}`;
+      fileName = req.file.originalname;
     }
 
     const resource = await prisma.resource.create({
-      data: { department, type: type || 'articulo', title, description: description || '', url, imageUrl, fileUrl, fileName }
+      data: { 
+        department, 
+        type: type || 'articulo', 
+        title, 
+        description: description || '', 
+        url: url || '#', 
+        imageUrl, 
+        fileUrl, 
+        fileName 
+      }
     });
 
     res.status(201).json(resource);
