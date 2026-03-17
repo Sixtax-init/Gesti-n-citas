@@ -464,9 +464,9 @@ function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void }) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block mb-1.5 text-slate-700 text-sm font-semibold ml-1">Carrera</label>
-                    <select 
-                      value={form.carrera} 
-                      onChange={e => set("carrera", e.target.value)} 
+                    <select
+                      value={form.carrera}
+                      onChange={e => set("carrera", e.target.value)}
                       required
                       className={`${inputCls} border-emerald-200 focus:border-emerald-600 focus:bg-white appearance-none cursor-pointer`}
                     >
@@ -1105,7 +1105,7 @@ function StudentDashboard() {
                       {["Matutino", "Vespertino"].map(shift => {
                         const specsInShift = deptSpecialists.filter(s => (s.shift || "Matutino") === shift);
                         if (specsInShift.length === 0) return null;
-                        
+
                         return (
                           <div key={shift} className="space-y-3">
                             <h5 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
@@ -1796,7 +1796,7 @@ function SpecialistDashboard() {
                   <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0 shadow-sm">
                     <Plus className="w-4 h-4 text-white" />
                   </div>
-                  <p className="text-blue-800 text-sm font-bold leading-tight">Haz clic en un día del calendario <br/><span className="text-blue-600 font-black uppercase text-[10px] tracking-widest">Para agregar un Horario</span></p>
+                  <p className="text-blue-800 text-sm font-bold leading-tight">Haz clic en un día del calendario <br /><span className="text-blue-600 font-black uppercase text-[10px] tracking-widest">Para agregar un Horario</span></p>
                 </div>
               </div>
 
@@ -1822,16 +1822,16 @@ function SpecialistDashboard() {
                         const dateObj = new Date(mondayOfCurrentWeek);
                         dateObj.setDate(mondayOfCurrentWeek.getDate() + i);
                         const isoDate = dateObj.toISOString().split("T")[0];
-                        const daySlots = spec.schedule.filter(s => 
-                          (s.specificDate === isoDate) || 
+                        const daySlots = spec.schedule.filter(s =>
+                          (s.specificDate === isoDate) ||
                           (s.specificDate === null && s.dayOfWeek === dow && (s.week === undefined || s.week === null || s.week === weekOffset))
                         );
                         const dateStr = `${dateObj.getDate()} ${dateObj.toLocaleDateString("es-MX", { month: "short" })}`.replace(".", "");
                         const isPast = dateObj < new Date(new Date().setHours(0, 0, 0, 0));
 
                         return (
-                          <div 
-                            key={`${weekOffset}-${day}`} 
+                          <div
+                            key={`${weekOffset}-${day}`}
                             onClick={() => !isPast && handleOpenAddSlot(dow, weekOffset, isoDate)}
                             className={`bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 min-h-[140px] sm:min-h-[160px] shadow-sm flex-shrink-0 w-[210px] sm:w-[240px] md:w-auto snap-start transition-all ${isPast ? "opacity-40" : "cursor-pointer hover:border-blue-400 hover:ring-4 hover:ring-blue-400/5 hover:bg-white"}`}
                           >
@@ -2094,6 +2094,7 @@ function AdminDashboard() {
   const [deptFilter, setDeptFilter] = useState("Todos");
   const [statusFilter, setStatusFilter] = useState("Todos");
   const [searchTerm, setSearchTerm] = useState("");
+  const [statsView, setStatsView] = useState("Global");
 
   // Action
   const [actionAppt, setActionAppt] = useState<Appointment | null>(null);
@@ -2112,16 +2113,65 @@ function AdminDashboard() {
   const [ctitle, setCtitle] = useState(""), [cdesc, setCdesc] = useState(""), [ctype, setCtype] = useState("video"), [curl, setCurl] = useState(""), [cimgUrl, setCimgUrl] = useState(""), [cdept, setCdept] = useState("Psicología");
 
   // Chart refs for PDF
-  const chartMonthlyRef = useRef<HTMLDivElement>(null);
-  const chartMotivosRef = useRef<HTMLDivElement>(null);
-  const chartModalidadRef = useRef<HTMLDivElement>(null);
-  const chartCarreraRef = useRef<HTMLDivElement>(null);
+  const chartGlobal = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null) };
+  const chartPsicologia = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null) };
+  const chartTutorias = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null) };
+  const chartNutricion = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null) };
+
+  // Helper mapping
+  const deptRefs: Record<string, typeof chartGlobal> = {
+    "Psicología": chartPsicologia,
+    "Tutorías": chartTutorias,
+    "Nutrición": chartNutricion,
+    "Reporte Global": chartGlobal
+  };
 
   const fullStats = getStats();
   const summary = fullStats.summary;
   const charts = fullStats.charts;
 
   const allAppts = getAppointments();
+
+  const deptChartData = useMemo(() => {
+    const depts = ["Psicología", "Tutorías", "Nutrición"];
+    const result: Record<string, any> = {};
+
+    depts.forEach(d => {
+      const deptAppts = allAppts.filter(a => a.department === d);
+
+      const monMap: Record<string, any> = {};
+      deptAppts.forEach(a => {
+        const date = new Date(a.date);
+        const mon = date.toLocaleString('es-MX', { month: 'short' });
+        if (!monMap[mon]) monMap[mon] = { month: mon, [d]: 0 };
+        monMap[mon][d]++;
+      });
+
+      const motMap: Record<string, number> = {};
+      const modMap: Record<string, number> = { "Presencial": 0, "Virtual": 0 };
+      const carMap: Record<string, number> = {};
+
+      deptAppts.forEach(a => {
+        const m = a.motivo || "Consulta General";
+        motMap[m] = (motMap[m] || 0) + 1;
+        if (a.modality === "Virtual") modMap["Virtual"]++;
+        else modMap["Presencial"]++;
+
+        const student = users.find(u => u.id === a.studentId);
+        const c = student?.carrera || "No especificada";
+        carMap[c] = (carMap[c] || 0) + 1;
+      });
+
+      result[d] = {
+        monthly: Object.values(monMap),
+        motivos: Object.entries(motMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8),
+        modalidad: Object.entries(modMap).map(([name, value]) => ({ name, value })),
+        carrera: Object.entries(carMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8)
+      };
+    });
+    return result;
+  }, [allAppts, users]);
+
   const filteredAppts = allAppts.filter(a => {
     if (deptFilter !== "Todos" && a.department !== deptFilter) return false;
     if (statusFilter !== "Todos" && a.status !== statusFilter) return false;
@@ -2207,159 +2257,196 @@ function AdminDashboard() {
     setCtitle(""); setCdesc(""); setCurl(""); setCimgUrl(""); setSelectedFile(null);
   };
 
+  const downloadChartAsImage = async (ref: React.RefObject<HTMLDivElement | null>, filename: string) => {
+    if (!ref.current) {
+      toast.error("No hay datos para esta gráfica");
+      return;
+    }
+    try {
+      const canvas = await html2canvas(ref.current, { scale: 3, useCORS: true, backgroundColor: '#ffffff' });
+      const link = document.createElement('a');
+      link.download = `${filename.replace(/\s+/g, '_').toLowerCase()}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      toast.success("Gráfica descargada");
+    } catch (e) {
+      console.error("Error exporting chart", e);
+      toast.error("Error al exportar la gráfica");
+    }
+  };
+
   const generatePDFReport = async (deptReport: string) => {
     const doc = new jsPDF();
     const today = new Date().toLocaleDateString("es-MX");
-    
-    // Header
-    doc.setFontSize(22);
-    doc.setTextColor(30, 41, 59);
-    doc.text("Sistema de Gestión de Citas", 105, 15, { align: "center" });
-    doc.setFontSize(14);
-    doc.text(`Reporte Institucional: ${deptReport}`, 105, 23, { align: "center" });
-    doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`Fecha de generación: ${today}`, 105, 29, { align: "center" });
-    
-    // Line separator
-    doc.setDrawColor(226, 232, 240);
-    doc.line(20, 35, 190, 35);
 
-    // Filter data
-    const list = deptReport === "Reporte Global" 
-      ? allAppts 
-      : allAppts.filter(a => a.department === deptReport);
-
-    const statsDetail = {
-      total: list.length,
-      confirmadas: list.filter(a => a.status === "Confirmada").length,
-      completadas: list.filter(a => a.status === "Completada").length,
-      pendientes: list.filter(a => a.status === "Pendiente").length,
-      canceladas: list.filter(a => a.status === "Cancelada").length,
+    const drawHeader = (title: string) => {
+      doc.setFontSize(22);
+      doc.setTextColor(30, 41, 59);
+      doc.text("Sistema de Gestión de Citas", 105, 15, { align: "center" });
+      doc.setFontSize(14);
+      doc.text(title, 105, 23, { align: "center" });
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Fecha de generación: ${today}`, 105, 29, { align: "center" });
+      doc.setDrawColor(226, 232, 240);
+      doc.line(20, 35, 190, 35);
     };
 
-    // Calculate detailed stats for the filtered list
-    const motivosMap: Record<string, number> = {};
-    const carreraMap: Record<string, number> = {};
-    const modalidadMap: Record<string, number> = { "Presencial": 0, "Virtual": 0 };
+    const getDeptStats = (deptList: Appointment[]) => {
+      const motivosMap: Record<string, number> = {};
+      const modalidadMap: Record<string, number> = { "Presencial": 0, "Virtual": 0 };
 
-    list.forEach(a => {
-      // Motivos
-      const m = a.motivo || "Consulta General";
-      motivosMap[m] = (motivosMap[m] || 0) + 1;
-      
-      // Modalidad
-      if (a.modality === "Virtual") modalidadMap["Virtual"]++;
-      else modalidadMap["Presencial"]++;
-    });
+      deptList.forEach(a => {
+        const m = a.motivo || "Consulta General";
+        motivosMap[m] = (motivosMap[m] || 0) + 1;
+        if (a.modality === "Virtual") modalidadMap["Virtual"]++;
+        else modalidadMap["Presencial"]++;
+      });
 
-    // For careers, we need to map via users if available, or just skip if not easy.
-    // Since we have users loaded in StoreContext, we can try to map studentId to career.
-    list.forEach(a => {
-      const student = users.find(u => u.id === a.studentId);
-      const c = student?.carrera || "No especificada";
-      carreraMap[c] = (carreraMap[c] || 0) + 1;
-    });
+      return {
+        total: deptList.length,
+        confirmadas: deptList.filter(a => a.status === "Confirmada").length,
+        completadas: deptList.filter(a => a.status === "Completada").length,
+        pendientes: deptList.filter(a => a.status === "Pendiente").length,
+        canceladas: deptList.filter(a => a.status === "Cancelada").length,
+        topMotivos: Object.entries(motivosMap).sort(([, a], [, b]) => b - a).slice(0, 5),
+        modalidad: Object.entries(modalidadMap)
+      };
+    };
 
-    const topMotivos = Object.entries(motivosMap)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 5);
+    if (deptReport === "Reporte Global") {
+      const depts = ["Psicología", "Tutorías", "Nutrición"];
 
-    const careerStats = Object.entries(carreraMap)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 10);
+      for (let i = 0; i < depts.length; i++) {
+        const dept = depts[i];
+        if (i > 0) doc.addPage();
+        drawHeader(`Reporte por Departamento: ${dept}`);
 
-    // Summary table
-    doc.setFontSize(12);
-    doc.setTextColor(30, 41, 59);
-    doc.text("Resumen General", 20, 45);
-    
-    autoTable(doc, {
-      startY: 50,
-      head: [["Métrica", "Cantidad"]],
-      body: [
-        ["Total de Citas", statsDetail.total],
-        ["Confirmadas", statsDetail.confirmadas],
-        ["Completadas", statsDetail.completadas],
-        ["Pendientes", statsDetail.pendientes],
-        ["Canceladas", statsDetail.canceladas],
-      ],
-      theme: "grid",
-      headStyles: { fillColor: [59, 130, 246] },
-      margin: { left: 20, right: 20 }
-    });
+        const deptList = allAppts.filter(a => a.department === dept);
+        const stats = getDeptStats(deptList);
 
-    let currentY = (doc as any).lastAutoTable.finalY + 15;
+        doc.setFontSize(12);
+        doc.text("Resumen de Actividad", 20, 45);
+        autoTable(doc, {
+          startY: 50,
+          head: [["Métrica", "Cantidad"]],
+          body: [
+            ["Total de Citas", stats.total],
+            ["Confirmadas", stats.confirmadas],
+            ["Completadas", stats.completadas],
+            ["Pendientes", stats.pendientes],
+            ["Canceladas", stats.canceladas],
+          ],
+          theme: "grid",
+          headStyles: { fillColor: [59, 130, 246] },
+          margin: { left: 20, right: 20 }
+        });
 
-    // Detailed Stats Tables (Replacing visual charts if capture fails or providing extra data)
-    doc.text("Desglose Estadístico", 20, currentY);
-    currentY += 5;
+        let currentY = (doc as any).lastAutoTable.finalY + 15;
+        doc.text("Distribución de Motivos y Modalidad", 20, currentY);
 
-    autoTable(doc, {
-      startY: currentY,
-      head: [["Motivos más frecuentes", "Citas"]],
-      body: topMotivos,
-      theme: "striped",
-      headStyles: { fillColor: [71, 85, 105] },
-      margin: { left: 20, right: 105 }
-    });
+        autoTable(doc, {
+          startY: currentY + 5,
+          head: [["Motivos más frecuentes", "Citas"]],
+          body: stats.topMotivos,
+          theme: "striped",
+          headStyles: { fillColor: [71, 85, 105] },
+          margin: { left: 20, right: 105 }
+        });
 
-    autoTable(doc, {
-      startY: currentY,
-      head: [["Modalidad", "Citas"]],
-      body: Object.entries(modalidadMap),
-      theme: "striped",
-      headStyles: { fillColor: [71, 85, 105] },
-      margin: { left: 110, right: 20 }
-    });
+        autoTable(doc, {
+          startY: currentY + 5,
+          head: [["Modalidad", "Citas"]],
+          body: stats.modalidad,
+          theme: "striped",
+          headStyles: { fillColor: [71, 85, 105] },
+          margin: { left: 110, right: 20 }
+        });
 
-    currentY = Math.max((doc as any).lastAutoTable.finalY, currentY) + 15;
-
-    // Charts inclusion
-    const addChartToDoc = async (ref: React.RefObject<HTMLDivElement | null>, title: string, y: number) => {
-      if (ref.current) {
-        try {
-          const canvas = await html2canvas(ref.current, { scale: 2 });
-          const imgData = canvas.toDataURL("image/png");
-          // Check if we need a new page
-          if (y + 100 > 280) {
-            doc.addPage();
-            y = 20;
-          }
-          doc.setFontSize(12);
-          doc.setTextColor(30, 41, 59);
-          doc.text(title, 20, y);
-          doc.addImage(imgData, "PNG", 20, y + 5, 170, 85);
-          return y + 100;
-        } catch (e) { 
-          console.error("Error capturing chart", e); 
-          return y; 
-        }
+        doc.setFontSize(10);
+        doc.setTextColor(100, 116, 139);
+        doc.text("* Las gráficas estadísticas están disponibles para descarga como imagen en la sección de Estadísticas del sistema.", 20, (doc as any).lastAutoTable.finalY + 15);
       }
-      return y;
-    };
 
-    doc.addPage();
-    doc.setFontSize(14);
-    doc.text("Análisis Visual", 105, 15, { align: "center" });
-    currentY = 25;
+      // Add Global Summary Page
+      doc.addPage();
+      drawHeader("Resumen Institucional Consolidado");
 
-    // We use the hidden chart container refs
-    currentY = await addChartToDoc(chartMonthlyRef, "Tendencias Mensuales", currentY);
-    currentY = await addChartToDoc(chartMotivosRef, "Distribución de Motivos", currentY);
-    
-    currentY = await addChartToDoc(chartModalidadRef, "Modalidad de Atención", currentY);
-    currentY = await addChartToDoc(chartCarreraRef, "Distribución por Carrera", currentY);
+      doc.setFontSize(12);
+      doc.text("Estadísticas Globales Comparativas", 20, 45);
+      autoTable(doc, {
+        startY: 50,
+        head: [["Departamento", "Total Citas", "Completadas", "Pendientes"]],
+        body: depts.map(d => {
+          const dl = allAppts.filter(a => a.department === d);
+          return [d, dl.length, dl.filter(a => a.status === "Completada").length, dl.filter(a => a.status === "Pendiente").length];
+        }),
+        theme: "grid",
+        headStyles: { fillColor: [30, 41, 59] },
+        margin: { left: 20, right: 20 }
+      });
 
+    } else {
+      // Individual Department Report
+      drawHeader(`Reporte Institucional: ${deptReport}`);
+      const list = allAppts.filter(a => a.department === deptReport);
+      const stats = getDeptStats(list);
+
+      doc.setFontSize(12);
+      doc.text("Resumen General", 20, 45);
+      autoTable(doc, {
+        startY: 50,
+        head: [["Métrica", "Cantidad"]],
+        body: [
+          ["Total de Citas", stats.total],
+          ["Confirmadas", stats.confirmadas],
+          ["Completadas", stats.completadas],
+          ["Pendientes", stats.pendientes],
+          ["Canceladas", stats.canceladas],
+        ],
+        theme: "grid",
+        headStyles: { fillColor: [59, 130, 246] },
+        margin: { left: 20, right: 20 }
+      });
+
+      let currentY = (doc as any).lastAutoTable.finalY + 15;
+      doc.text("Desglose Estadístico", 20, currentY);
+
+      autoTable(doc, {
+        startY: currentY + 5,
+        head: [["Motivos más frecuentes", "Citas"]],
+        body: stats.topMotivos,
+        theme: "striped",
+        headStyles: { fillColor: [71, 85, 105] },
+        margin: { left: 20, right: 105 }
+      });
+
+      autoTable(doc, {
+        startY: currentY + 5,
+        head: [["Modalidad", "Citas"]],
+        body: stats.modalidad,
+        theme: "striped",
+        headStyles: { fillColor: [71, 85, 105] },
+        margin: { left: 110, right: 20 }
+      });
+
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      doc.text("* Las gráficas estadísticas están disponibles para descarga como imagen en la sección de Estadísticas del sistema.", 20, (doc as any).lastAutoTable.finalY + 15);
+    }
+
+    // Common Detailed Breakdown at the end
     doc.addPage();
     doc.setFontSize(12);
     doc.setTextColor(30, 41, 59);
     doc.text("Desglose Detallado de Citas", 20, 15);
-    
+
+    const finalTableList = deptReport === "Reporte Global" ? allAppts : allAppts.filter(a => a.department === deptReport);
+
     autoTable(doc, {
       startY: 20,
       head: [["Alumno", "Especialista", "Fecha", "Hora", "Estado"]],
-      body: list.slice(0, 100).map(a => [
+      body: finalTableList.slice(0, 100).map(a => [
         a.studentName,
         a.specialistName,
         a.date,
@@ -2371,9 +2458,9 @@ function AdminDashboard() {
       margin: { left: 20, right: 20 }
     });
 
-    if (list.length > 100) {
+    if (finalTableList.length > 100) {
       doc.setFontSize(8);
-      doc.text(`* Mostrando los primeros 100 registros de ${list.length} totales.`, 20, (doc as any).lastAutoTable.finalY + 10);
+      doc.text(`* Mostrando los primeros 100 registros de ${finalTableList.length} totales.`, 20, (doc as any).lastAutoTable.finalY + 10);
     }
 
     doc.save(`reporte_${deptReport.replace(/\s+/g, '_').toLowerCase()}.pdf`);
@@ -2438,7 +2525,7 @@ function AdminDashboard() {
               <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
                 <div>
                   <h3 className="text-xl font-bold text-slate-900">Registro Global de Citas</h3>
-                  <p className="text-slate-500 font-medium text-sm mt-1">Busca y filtra citas de todas las facultades</p>
+                  <p className="text-slate-500 font-medium text-sm mt-1">Busca y filtra citas de todos los departamentos</p>
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
@@ -2545,15 +2632,15 @@ function AdminDashboard() {
                         <span className={`px-2.5 py-1 rounded-full ${esp.active ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-100 text-slate-400 border-slate-200'} font-bold text-[0.65rem] uppercase tracking-wider shrink-0 border`}>
                           {esp.active ? 'Activo' : 'Inactivo'}
                         </span>
-                        
+
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button 
+                          <button
                             onClick={() => setEditingSpec(esp)}
                             className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
                           >
                             <Pencil className="w-4 h-4" />
                           </button>
-                          <button 
+                          <button
                             onClick={() => {
                               if (confirm(`¿Eliminar a ${esp.name}?`)) {
                                 removeSpecialist(esp.id);
@@ -2603,68 +2690,139 @@ function AdminDashboard() {
           {/* ─── Estadísticas Tab ─── */}
           {activeTab === "estadisticas" && (
             <div className="p-8 bg-slate-50/50 min-h-full">
-              <h3 className="text-2xl font-bold text-slate-900 mb-8">Análisis de Datos</h3>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                <div>
+                  <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Análisis de Datos e Impacto</h3>
+                  <p className="text-slate-500 font-medium">Visualiza y exporta las métricas de atención institucional</p>
+                </div>
+                <div className="flex bg-white rounded-xl p-1 border border-slate-200 shadow-sm">
+                  {["Global", "Psicología", "Tutorías", "Nutrición"].map(v => (
+                    <button
+                      key={v}
+                      onClick={() => setStatsView(v)}
+                      className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${statsView === v ? "bg-blue-600 text-white shadow-md shadow-blue-600/20" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"}`}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div className="space-y-6">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Monthly Trends */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
-                    <h4 className="text-slate-900 font-bold mb-6 text-lg">Citas por Mes y Facultad</h4>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={charts.monthly} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                        <XAxis dataKey="month" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} dy={10} />
-                        <YAxis tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-                        <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                        <Bar dataKey="Psicología" fill="#2563EB" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                        <Bar dataKey="Tutorías" fill="#16A34A" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                        <Bar dataKey="Nutrición" fill="#EA580C" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                {/* Dynamically render charts based on selected view */}
+                {(() => {
+                  const isGlobal = statsView === "Global";
+                  const data = isGlobal ? charts : deptChartData[statsView];
+                  const refs = isGlobal ? chartGlobal : deptRefs[statsView];
 
-                  {/* Top Reasons */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
-                    <h4 className="text-slate-900 font-bold mb-6 text-lg">Motivos Frecuentes</h4>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie data={charts.motivos} cx="50%" cy="50%" outerRadius={100} innerRadius={60} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={{ stroke: '#cbd5e1' }}>
-                          {charts.motivos.map((_, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                        </Pie>
-                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+                  if (!data || !refs) return null;
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Modality */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
-                    <h4 className="text-slate-900 font-bold mb-6 text-lg">Modalidad de Atención</h4>
-                    <ResponsiveContainer width="100%" height={260}>
-                      <PieChart>
-                        <Pie data={charts.modalidad} cx="50%" cy="50%" innerRadius={70} outerRadius={100} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={false}>
-                          <Cell fill="#3b82f6" /><Cell fill="#10b981" />
-                        </Pie>
-                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
+                  return (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Monthly Trends */}
+                        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm group">
+                          <div className="flex items-center justify-between mb-6">
+                            <h4 className="text-slate-900 font-bold text-lg">Citas por Mes {isGlobal ? "y Departamento" : ""}</h4>
+                            <button
+                              onClick={() => downloadChartAsImage(refs.monthly, `Tendencias_${statsView}`)}
+                              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                              title="Descargar como imagen"
+                            >
+                              <Download className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <BarChart data={data.monthly} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                              <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} dy={10} interval={0} minTickGap={0} />
+                              <YAxis tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                              <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                              {isGlobal ? (
+                                <>
+                                  <Bar dataKey="Psicología" fill="#2563EB" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                  <Bar dataKey="Tutorías" fill="#16A34A" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                  <Bar dataKey="Nutrición" fill="#EA580C" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                </>
+                              ) : (
+                                <Bar dataKey={statsView} fill={statsView === "Psicología" ? "#2563EB" : statsView === "Tutorías" ? "#16A34A" : "#EA580C"} radius={[4, 4, 0, 0]} maxBarSize={50} />
+                              )}
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
 
-                  {/* By Career */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
-                    <h4 className="text-slate-900 font-bold mb-6 text-lg">Distribución por Carrera</h4>
-                    <ResponsiveContainer width="100%" height={260}>
-                      <BarChart data={charts.carrera} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
-                        <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-                        <YAxis dataKey="name" type="category" tick={{ fontSize: 11, fill: "#475569", fontWeight: 500 }} axisLine={false} tickLine={false} width={120} />
-                        <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                        <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} maxBarSize={24} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+                        {/* Top Reasons */}
+                        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm group">
+                          <div className="flex items-center justify-between mb-6">
+                            <h4 className="text-slate-900 font-bold text-lg">Motivos Frecuentes</h4>
+                            <button
+                              onClick={() => downloadChartAsImage(refs.motivos, `Motivos_${statsView}`)}
+                              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                              title="Descargar como imagen"
+                            >
+                              <Download className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <PieChart>
+                              <Pie data={data.motivos} cx="50%" cy="50%" outerRadius={100} innerRadius={60} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={{ stroke: '#cbd5e1' }}>
+                                {data.motivos.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                              </Pie>
+                              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Modality */}
+                        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm group">
+                          <div className="flex items-center justify-between mb-6">
+                            <h4 className="text-slate-900 font-bold text-lg">Modalidad de Atención</h4>
+                            <button
+                              onClick={() => downloadChartAsImage(refs.modalidad, `Modalidad_${statsView}`)}
+                              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                              title="Descargar como imagen"
+                            >
+                              <Download className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <ResponsiveContainer width="100%" height={260}>
+                            <PieChart>
+                              <Pie data={data.modalidad} cx="50%" cy="50%" innerRadius={70} outerRadius={100} dataKey="value" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `} labelLine={false}>
+                                <Cell fill="#3b82f6" /><Cell fill="#10b981" />
+                              </Pie>
+                              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+
+                        {/* By Career */}
+                        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm group">
+                          <div className="flex items-center justify-between mb-6">
+                            <h4 className="text-slate-900 font-bold text-lg">Distribución por Carrera</h4>
+                            <button
+                              onClick={() => downloadChartAsImage(refs.carrera, `Carreras_${statsView}`)}
+                              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                              title="Descargar como imagen"
+                            >
+                              <Download className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <ResponsiveContainer width="100%" height={320}>
+                            <BarChart data={data.carrera} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                              <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                              <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: "#475569", fontWeight: 500 }} axisLine={false} tickLine={false} width={100} interval={0} />
+                              <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                              <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} maxBarSize={24} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -2818,11 +2976,11 @@ function AdminDashboard() {
                       <div key={ev.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                         {ev.imageUrl && <div className="h-32 bg-slate-100 overflow-hidden relative">
                           <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent z-10" />
-                          <img 
-                            src={ev.imageUrl.startsWith('http') ? ev.imageUrl : `${API_BASE}${ev.imageUrl}`} 
-                            alt={ev.title} 
-                            className="w-full h-full object-cover relative z-0" 
-                            onError={(e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).style.display = "none" }} 
+                          <img
+                            src={ev.imageUrl.startsWith('http') ? ev.imageUrl : `${API_BASE}${ev.imageUrl}`}
+                            alt={ev.title}
+                            className="w-full h-full object-cover relative z-0"
+                            onError={(e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).style.display = "none" }}
                           />
                           <div className="absolute bottom-3 left-3 z-20 flex items-center gap-2">
                             <span className={`px - 2 py - 0.5 rounded - md font - bold text - [0.65rem] uppercase tracking - wider shadow - sm ${ev.type === "conferencia" ? "bg-violet-500 text-white" : "bg-blue-500 text-white"} `}>{ev.type === "conferencia" ? "Conferencia" : "Taller"}</span>
@@ -2873,7 +3031,7 @@ function AdminDashboard() {
                         <td className="px-6 py-4 text-slate-500 font-medium text-sm">{est.semestre || "—"}°</td>
                         <td className="px-6 py-4 text-slate-400 text-xs font-medium">{est.email}</td>
                         <td className="px-6 py-4">
-                          <button 
+                          <button
                             onClick={() => {
                               if (confirm(`¿Seguro que deseas eliminar al estudiante ${est.name}? Esta acción no se puede deshacer.`)) {
                                 deleteUser(est.id);
@@ -2904,8 +3062,9 @@ function AdminDashboard() {
 
       {/* Hidden container for PDF chart capture */}
       <div style={{ position: 'fixed', left: '-9999px', top: '-9999px', width: '1200px', pointerEvents: 'none' }}>
-        <div ref={chartMonthlyRef} style={{ background: 'white', padding: '40px', width: '1000px' }}>
-          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Citas por Mes y Facultad</h4>
+        {/* Global set */}
+        <div ref={chartGlobal.monthly} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Citas por Mes y Departamento (Global)</h4>
           <div style={{ width: '900px', height: '400px' }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={charts.monthly} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -2919,8 +3078,8 @@ function AdminDashboard() {
             </ResponsiveContainer>
           </div>
         </div>
-        <div ref={chartMotivosRef} style={{ background: 'white', padding: '40px', width: '1000px' }}>
-          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Motivos Frecuentes</h4>
+        <div ref={chartGlobal.motivos} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Motivos Frecuentes (Global)</h4>
           <div style={{ width: '900px', height: '400px' }}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -2931,8 +3090,8 @@ function AdminDashboard() {
             </ResponsiveContainer>
           </div>
         </div>
-        <div ref={chartModalidadRef} style={{ background: 'white', padding: '40px', width: '1000px' }}>
-          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Modalidad de Atención</h4>
+        <div ref={chartGlobal.modalidad} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Modalidad (Global)</h4>
           <div style={{ width: '900px', height: '400px' }}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -2943,19 +3102,80 @@ function AdminDashboard() {
             </ResponsiveContainer>
           </div>
         </div>
-        <div ref={chartCarreraRef} style={{ background: 'white', padding: '40px', width: '1000px' }}>
-          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Distribución por Carrera</h4>
-          <div style={{ width: '900px', height: '500px' }}>
+        <div ref={chartGlobal.carrera} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+          <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Distribución por Carrera (Global)</h4>
+          <div style={{ width: '900px', height: '400px' }}>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={charts.carrera} layout="vertical" margin={{ top: 0, right: 50, left: 50, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+              <BarChart data={charts.carrera} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
                 <XAxis type="number" />
-                <YAxis dataKey="name" type="category" width={150} />
-                <Bar dataKey="value" fill="#8b5cf6" />
+                <YAxis dataKey="name" type="category" width={100} />
+                <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
+
+        {/* Per-Department sets */}
+        {["Psicología", "Tutorías", "Nutrición"].map(dept => {
+          const refs = deptRefs[dept];
+          const data = deptChartData[dept];
+          if (!data) return null;
+
+          return (
+            <div key={dept}>
+              <div ref={refs.monthly} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+                <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Tendencias: {dept}</h4>
+                <div style={{ width: '900px', height: '400px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={data.monthly}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Bar dataKey={dept} fill={dept === "Psicología" ? "#2563EB" : dept === "Tutorías" ? "#16A34A" : "#EA580C"} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div ref={refs.motivos} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+                <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Motivos: {dept}</h4>
+                <div style={{ width: '900px', height: '400px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={data.motivos} cx="50%" cy="50%" outerRadius={150} innerRadius={80} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `}>
+                        {data.motivos.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div ref={refs.modalidad} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+                <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Modalidad: {dept}</h4>
+                <div style={{ width: '900px', height: '400px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={data.modalidad} cx="50%" cy="50%" outerRadius={150} innerRadius={80} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}% `}>
+                        {data.modalidad.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div ref={refs.carrera} style={{ background: 'white', padding: '40px', width: '1000px' }}>
+                <h4 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>Distribución por Carrera: {dept}</h4>
+                <div style={{ width: '900px', height: '400px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={data.carrera} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
+                      <XAxis type="number" />
+                      <YAxis dataKey="name" type="category" width={100} />
+                      <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Modal: Editar Especialista */}
@@ -2992,12 +3212,12 @@ function AdminDashboard() {
             <div>
               <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Cuenta Activa</label>
               <div className="flex items-center gap-2 h-[46px]">
-                <input 
-                  type="checkbox" 
-                  id="spec-active" 
-                  checked={editingSpec?.active || false} 
-                  onChange={e => setEditingSpec(p => p ? { ...p, active: e.target.checked } : null)} 
-                  className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+                <input
+                  type="checkbox"
+                  id="spec-active"
+                  checked={editingSpec?.active || false}
+                  onChange={e => setEditingSpec(p => p ? { ...p, active: e.target.checked } : null)}
+                  className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <label htmlFor="spec-active" className="text-sm font-bold text-slate-600">Habilitado</label>
               </div>

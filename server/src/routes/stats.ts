@@ -44,7 +44,7 @@ router.get('/', async (req, res) => {
       by: ['motivo'],
       _count: { motivo: true },
       orderBy: { _count: { motivo: 'desc' } },
-      take: 5
+      take: 8
     });
     
     const chartMotivos = rawMotivos.map(m => ({
@@ -63,7 +63,7 @@ router.get('/', async (req, res) => {
       value: m._count.modality || 0
     }));
 
-    // Por Carrera - basado en citas reales para reflejar la demanda actual
+    // Por Carrera - limitado a las mejores 8 para escalabilidad
     const apptsWithStudents = await prisma.appointment.findMany({
       select: { 
         studentId: true 
@@ -84,6 +84,11 @@ router.get('/', async (req, res) => {
       careerMap[careerName] = (careerMap[careerName] || 0) + 1;
     });
 
+    const chartCarreras = Object.entries(careerMap)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+
     res.json({
       summary: {
         total: totalAppointments,
@@ -97,7 +102,7 @@ router.get('/', async (req, res) => {
         monthly: Object.values(monthlyMap),
         motivos: chartMotivos,
         modalidad: chartModalidades,
-        carrera: Object.entries(careerMap).map(([name, value]) => ({ name, value }))
+        carrera: chartCarreras
       }
     });
   } catch (error) {
