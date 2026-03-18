@@ -115,7 +115,7 @@ export interface StoreContextType {
   addEvent: (ev: Omit<AppEvent, "id">, file?: File) => Promise<void>;
   resources: Resource[];
   addResource: (r: Omit<Resource, "id">, file?: File) => Promise<void>;
-  getStats: () => { 
+  getStats: () => {
     summary: { total: number; pendientes: number; confirmadas: number; completadas: number; canceladas: number; byDept: Record<string, number> };
     charts: {
       monthly: any[];
@@ -127,6 +127,8 @@ export interface StoreContextType {
   notifications: Record<string, AppNotification[]>;
   addNotification: (userId: string, notif: Omit<AppNotification, "id" | "time" | "read">) => void;
   markNotificationsRead: (userId: string) => void;
+  deleteNotification: (userId: string, notifId: string) => void;
+  clearAllNotifications: (userId: string) => void;
   deleteUser: (id: string) => Promise<void>;
 }
 

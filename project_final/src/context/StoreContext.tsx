@@ -1,7 +1,20 @@
 import React, { useState, useCallback, createContext, useContext } from "react";
 import { StoreContextType, AppNotification, Specialist, Appointment, AppEvent, Resource, AppointmentFilters } from "../types";
+import { SEED_NOTIFICATIONS } from "../data/mockData";
 
-const API = 'http://localhost:3000/api';
+export const API_BASE = 'http://localhost:3000';
+const API = `${API_BASE}/api`;
+
+/**
+ * Converts a relative upload path (/uploads/...) returned by the backend
+ * into a full absolute URL. External URLs (http/https) are returned as-is.
+ */
+export function getImageUrl(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/uploads/')) return `${API_BASE}${url}`;
+  return url;
+}
 
 export const StoreContext = createContext<StoreContextType | null>(null);
 
@@ -11,46 +24,80 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
-  const [notifications, setNotifications] = useState<Record<string, AppNotification[]>>({});
+  const [notifications, setNotifications] = useState<Record<string, AppNotification[]>>(SEED_NOTIFICATIONS);
   const [specialistsLoaded, setSpecialistsLoaded] = useState(false);
 
   // ── Initial data fetch from backend ──
-  React.useEffect(() => {
-    fetch(`${API}/specialists`)
-      .then(res => res.json())
-      .then(data => {
-        // Prisma returns `schedules` (relation name), frontend type expects `schedule`
+  const fetchAll = React.useCallback(async () => {
+    try {
+      const [specsRes, apptsRes, eventsRes, resourcesRes, usersRes] = await Promise.all([
+        fetch(`${API}/specialists`),
+        fetch(`${API}/appointments`),
+        fetch(`${API}/events`),
+        fetch(`${API}/resources`),
+        fetch(`${API}/users?t=${Date.now()}`),
+      ]);
+
+      if (specsRes.ok) {
+        const data = await specsRes.json();
         const mapped = data.map((s: any) => ({ ...s, schedule: s.schedules ?? [] }));
         setSpecialists(mapped);
         setSpecialistsLoaded(true);
-      })
-      .catch(() => setSpecialistsLoaded(true));
+      }
 
-    fetch(`${API}/appointments`)
-      .then(res => res.json())
-      .then(setAppointments)
-      .catch(console.error);
+      if (apptsRes.ok) {
+        const appts = await apptsRes.json();
+        // Sync names from the latest users/specialists data to keep them fresh
+        setAppointments(appts);
+      }
 
-    fetch(`${API}/events`)
-      .then(res => res.json())
-      .then(setEvents)
-      .catch(console.error);
+      if (eventsRes.ok) {
+        const data = await eventsRes.json();
+        setEvents(data.map((e: any) => ({ ...e, imageUrl: getImageUrl(e.imageUrl) })));
+      }
 
-    fetch(`${API}/resources`)
-      .then(res => res.json())
-      .then(setResources)
-      .catch(console.error);
+      if (resourcesRes.ok) {
+        const data = await resourcesRes.json();
+        setResources(data.map((r: any) => ({
+          ...r,
+          imageUrl: getImageUrl(r.imageUrl),
+          fileUrl: getImageUrl(r.fileUrl),
+        })));
+      }
 
-    fetch(`${API}/users?t=${Date.now()}`)
-      .then(res => res.json())
-      .then(data => {
-        console.log("DEBUG: Usuarios cargados desde API:", data);
+      if (usersRes.ok) {
+        const data = await usersRes.json();
         setUsers(data);
-      })
-      .catch(err => {
-        console.error("DEBUG: Error cargando usuarios:", err);
-      });
+      }
+    } catch (err) {
+      console.error("Error en fetchAll:", err);
+      setSpecialistsLoaded(true);
+    }
   }, []);
+
+  // Initial load
+  React.useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
+
+  // ── Polling cada 30 segundos ──
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      fetchAll();
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchAll]);
+
+  // ── Refetch al volver a la pestaña (visibilitychange) ──
+  React.useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        fetchAll();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [fetchAll]);
 
   const addNotification = useCallback((userId: string, notif: Omit<AppNotification, "id" | "time" | "read">) => {
     const newNotif: AppNotification = {
@@ -72,6 +119,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
+  const deleteNotification = useCallback((userId: string, notifId: string) => {
+    setNotifications(p => ({
+      ...p,
+      [userId]: (p[userId] || []).filter(n => n.id !== notifId)
+    }));
+  }, []);
+
+  const clearAllNotifications = useCallback((userId: string) => {
+    setNotifications(p => ({ ...p, [userId]: [] }));
+  }, []);
+
   // ── auth ──
   const loginUser = useCallback((email: string, password: string) => users.find(u => u.email === email && u.password === password) || null, [users]);
   const getUserById = useCallback((id: string) => users.find(u => u.id === id) || null, [users]);
@@ -79,7 +137,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // ── specialists ──
   const getSpecialists = useCallback((dept?: string) => dept ? specialists.filter(s => s.department === dept) : [...specialists], [specialists]);
   const getSpecialistById = useCallback((id: string) => specialists.find(s => s.id === id) || null, [specialists]);
-  
+
   const addSpecialist = useCallback(async (data: any) => {
     try {
       const res = await fetch(`${API}/specialists`, {
@@ -128,8 +186,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (filters.specialistId) r = r.filter(a => a.specialistId === filters.specialistId);
     if (filters.department) r = r.filter(a => a.department === filters.department);
     if (filters.status) r = r.filter(a => a.status === filters.status);
+
+    // Always resolve names from the latest users/specialists state
+    // so name changes in the DB are reflected without recreating appointments
+    r = r.map(appt => {
+      const student = users.find(u => u.id === appt.studentId);
+      const specialist = specialists.find(s => s.id === appt.specialistId);
+      return {
+        ...appt,
+        studentName: student?.name ?? appt.studentName,
+        specialistName: specialist?.name ?? appt.specialistName,
+      };
+    });
+
     return r.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [appointments]);
+  }, [appointments, users, specialists]);
 
   const createAppointment = useCallback((req: { studentId: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string; studentName?: string }) => {
     const spec = specialists.find(s => s.id === req.specialistId);
@@ -152,9 +223,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-    .then(res => res.json())
-    .then(newAppt => setAppointments(p => [newAppt, ...p.filter(a => !a.id.startsWith('temp-'))]))
-    .catch(console.error);
+      .then(res => res.json())
+      .then(newAppt => setAppointments(p => [newAppt, ...p.filter(a => !a.id.startsWith('temp-'))]))
+      .catch(console.error);
 
     // Optimistic return
     return { ...payload, id: `temp-${Date.now()}`, status: 'Pendiente', createdAt: new Date().toISOString() } as Appointment;
@@ -228,12 +299,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const getAvailableDays = useCallback(async (specialistId: string, year: number, month: number) => {
     const spec = specialists.find(s => s.id === specialistId);
     if (!spec) return [];
-    
+
     // Días de la semana con horarios recurrentes
     const recurringDows = [...new Set(spec.schedule.filter((s: any) => s.available && s.specificDate === null).map((s: any) => s.dayOfWeek))];
     // Fechas específicas con horarios únicos
     const specificDates = [...new Set(spec.schedule.filter((s: any) => s.available && s.specificDate !== null).map((s: any) => s.specificDate))];
-    
+
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const dayChecks: { date: Date; promise: Promise<string[]> }[] = [];
 
@@ -244,7 +315,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       for (let d = new Date(targetYear, normalizedMonth, 1), end = new Date(targetYear, normalizedMonth + 1, 0); d <= end; d.setDate(d.getDate() + 1)) {
         if (d < today) continue;
         const ds = d.toISOString().split("T")[0];
-        
+
         // Candidato si tiene horario recurrente para ese día de la semana O si tiene una fecha específica exacta
         if (recurringDows.includes(d.getDay()) || specificDates.includes(ds)) {
           dayChecks.push({ date: new Date(d), promise: getAvailableSlots(specialistId, ds) });
@@ -267,14 +338,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(slot)
     })
-    .then(res => res.json())
-    .then(newSlot => {
-      setSpecialists(p => p.map(s => s.id === specialistId
-        ? { ...s, schedule: [...s.schedule, newSlot] }
-        : s
-      ));
-    })
-    .catch(console.error);
+      .then(res => res.json())
+      .then(newSlot => {
+        setSpecialists(p => p.map(s => s.id === specialistId
+          ? { ...s, schedule: [...s.schedule, newSlot] }
+          : s
+        ));
+      })
+      .catch(console.error);
   }, []);
 
   const removeScheduleSlot = useCallback((specialistId: string, slotId: string) => {
@@ -298,7 +369,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       });
       if (res.ok) {
         const newEv = await res.json();
-        setEvents(p => [newEv, ...p]);
+        setEvents(p => [{ ...newEv, imageUrl: getImageUrl(newEv.imageUrl) }, ...p]);
       }
     } catch (error) { console.error('Error adding event:', error); }
   }, []);
@@ -318,7 +389,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       });
       if (res.ok) {
         const newRes = await res.json();
-        setResources(p => [...p, newRes]);
+        setResources(p => [...p, {
+          ...newRes,
+          imageUrl: getImageUrl(newRes.imageUrl),
+          fileUrl: getImageUrl(newRes.fileUrl),
+        }]);
       }
     } catch (error) { console.error('Error adding resource:', error); }
   }, []);
@@ -342,7 +417,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // ── stats ──
   const getStats = useCallback(() => {
     if (realStats) return realStats;
-    
+
     // Fallback while loading or if error
     return {
       summary: {
@@ -382,7 +457,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       users, specialistsLoaded, loginUser, getUserById, specialists, getSpecialists, getSpecialistById, addSpecialist,
       appointments, getAppointments, createAppointment, updateAppointmentStatus, rescheduleAppointment,
       getAvailableSlots, getAvailableDays, addScheduleSlot, removeScheduleSlot, events, addEvent,
-      resources, addResource, getStats, notifications, addNotification, markNotificationsRead, deleteUser,
+      resources, addResource, getStats, notifications, addNotification, markNotificationsRead,
+      deleteNotification, clearAllNotifications, deleteUser,
       updateSpecialist, removeSpecialist
     }}>
       {children}

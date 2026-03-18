@@ -23,7 +23,8 @@ router.get('/', async (req, res) => {
 // POST /api/resources
 router.post('/', upload.single('file'), async (req, res) => {
   try {
-    const { department, type, title, description, url, imageUrl } = req.body;
+    const { department, type, title, description, url } = req.body;
+    let imageUrl = req.body.imageUrl;
     let fileUrl = req.body.fileUrl;
     let fileName = req.body.fileName;
 
@@ -31,22 +32,29 @@ router.post('/', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'title y department son requeridos' });
     }
 
-    // Si se subió un archivo vía multer
+    // Route the uploaded file correctly depending on resource type:
+    //   image  → store as imageUrl (it IS the visual content)
+    //   others → store as fileUrl  (downloadable attachment)
     if (req.file) {
-      fileUrl = `/uploads/${req.file.filename}`;
-      fileName = req.file.originalname;
+      const uploadedPath = `/uploads/${req.file.filename}`;
+      if (type === 'image') {
+        imageUrl = uploadedPath;
+      } else {
+        fileUrl = uploadedPath;
+        fileName = req.file.originalname;
+      }
     }
 
     const resource = await prisma.resource.create({
-      data: { 
-        department, 
-        type: type || 'articulo', 
-        title, 
-        description: description || '', 
-        url: url || '#', 
-        imageUrl, 
-        fileUrl, 
-        fileName 
+      data: {
+        department,
+        type: type || 'articulo',
+        title,
+        description: description || '',
+        url: url || '#',
+        imageUrl,
+        fileUrl,
+        fileName
       }
     });
 
