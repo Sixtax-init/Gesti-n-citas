@@ -21,6 +21,7 @@ import eventsRoutes from './routes/events';
 import resourcesRoutes from './routes/resources';
 import usersRoutes from './routes/users';
 import statsRoutes from './routes/stats';
+import notificationsRoutes from './routes/notifications';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/appointments', appointmentsRoutes);
@@ -29,6 +30,7 @@ app.use('/api/events', eventsRoutes);
 app.use('/api/resources', resourcesRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/notifications', notificationsRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'API is running' });

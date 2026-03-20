@@ -1,14 +1,26 @@
 import { Router } from 'express';
 import { prisma } from '../db';
+import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 
 const router = Router();
 
-// GET /api/users
-router.get('/', async (req, res) => {
+// GET /api/users — role-based filtering
+router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
-    const { role } = req.query;
+    const caller = req.user!;
     const where: any = {};
-    if (role) where.role = role;
+
+    if (caller.role === 'admin') {
+      // Admin sees all; optional ?role= filter
+      const role = req.query.role as string | undefined;
+      if (role) where.role = role;
+    } else if (caller.role === 'especialista') {
+      // Specialists only need student data
+      where.role = 'alumno';
+    } else {
+      // Students only see themselves
+      where.id = caller.id;
+    }
 
     const users = await prisma.user.findMany({
       where,
@@ -21,6 +33,7 @@ router.get('/', async (req, res) => {
       },
       orderBy: { createdAt: 'desc' }
     });
+
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -29,10 +42,18 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/users/:id
-router.get('/:id', async (req, res) => {
+router.get('/:id', verifyToken as any, async (req: AuthRequest, res) => {
   try {
+    const id = req.params.id as string;
+    const caller = req.user!;
+
+    // Non-admin can only fetch their own record
+    if (caller.role !== 'admin' && caller.id !== id) {
+      return res.status(403).json({ error: 'Sin permisos' });
+    }
+
     const user = await prisma.user.findUnique({
-      where: { id: req.params.id },
+      where: { id },
       select: {
         id: true, email: true, name: true, role: true,
         matricula: true, carrera: true, semestre: true,
@@ -47,16 +68,17 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/users/:id
-router.delete('/:id', async (req, res) => {
+// DELETE /api/users/:id — admin only
+router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
-    
-    // Check if user exists
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Sin permisos' });
+    }
+
+    const id = req.params.id as string;
     const user = await prisma.user.findUnique({ where: { id } });
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-    // Ensure we don't delete the main admin (prevent lock-out)
     if (user.email === 'admin@instituto.edu.mx') {
       return res.status(403).json({ error: 'No se puede eliminar el administrador principal' });
     }
