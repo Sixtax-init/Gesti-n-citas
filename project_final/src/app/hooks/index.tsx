@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import { useStore } from "../../context/StoreContext";
 import { useAuth } from "../../context/AuthContext";
+import { localISODate } from "../../utils/date";
 
 export function useAppointmentWizard() {
     const { user } = useAuth();
@@ -35,7 +36,7 @@ export function useAppointmentWizard() {
 
     useEffect(() => {
         if (!selDate || !selSpecId) { setSlotsForDate([]); return; }
-        getAvailableSlots(selSpecId, selDate.toISOString().split("T")[0]).then(setSlotsForDate);
+        getAvailableSlots(selSpecId, localISODate(selDate)).then(setSlotsForDate);
     }, [selDate, selSpecId]);
 
     const confirm = () => {
@@ -46,7 +47,7 @@ export function useAppointmentWizard() {
             department: selDept!,
             motivo: selReason,
             modality: selModality,
-            preferredDate: selDate!.toISOString().split("T")[0],
+            preferredDate: localISODate(selDate!),
             preferredTime: selSlot!,
         });
         setStep(4);
@@ -98,7 +99,7 @@ export function useReschedule(role: "student" | "specialist") {
         if (!date || !apptId) { setSlots([]); return; }
         const appt = appointments.find(a => a.id === apptId);
         if (!appt) return;
-        getAvailableSlots(appt.specialistId, date.toISOString().split("T")[0]).then(setSlots);
+        getAvailableSlots(appt.specialistId, localISODate(date)).then(setSlots);
     }, [date, apptId]);
 
     const open = (id: string) => {
@@ -107,7 +108,7 @@ export function useReschedule(role: "student" | "specialist") {
 
     const confirm = () => {
         if (!apptId || !date || !slot) return;
-        rescheduleAppointment(apptId, date.toISOString().split("T")[0], slot, role, selModality);
+        rescheduleAppointment(apptId, localISODate(date), slot, role, selModality);
         setShow(false); setApptId(null); setDate(null); setSlot(null);
     };
 

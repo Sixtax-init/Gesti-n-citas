@@ -4,7 +4,7 @@ import {
     Clock, CalendarCheck, CheckCircle2, Users, FileText, Megaphone,
     CalendarDays, Info, RefreshCw, Pencil, Trash2, Calendar,
     Video, Plus, ExternalLink, Image as ImageIcon,
-    ClipboardList, ArrowRight, Lock,
+    ClipboardList, ArrowRight, Lock, History,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
@@ -12,6 +12,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, Modal, MiniCalendar, StatusBadge, inputCls } from "../../components/ui";
 import { DAYS_FULL } from "../../../constants";
 import { useReschedule, useActionModal } from "../../hooks";
+import { localISODate } from "../../../utils/date";
 import type { Appointment } from "../../../types";
 
 // ─── Schedule slot management hook ───────────────────────
@@ -48,6 +49,58 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
 
     const save = () => {
         if (!specId) return;
+
+        // ── Modo semana completa: "Esta semana" (0) o "Próxima semana" (1) ──
+        if ((newWeek === "0" || newWeek === "1") && !editingSlotId) {
+            const weekOffset = parseInt(String(newWeek));
+            const todayM = new Date(); todayM.setHours(0, 0, 0, 0);
+            const dayShift = todayM.getDay() === 0 ? 1 : 1 - todayM.getDay();
+            const mondayOfWeek = new Date(todayM);
+            mondayOfWeek.setDate(todayM.getDate() + dayShift + weekOffset * 7);
+
+            // Calcula los días hábiles (Lun-Vie) de la semana objetivo que no hayan pasado
+            const daysToCreate: number[] = [];
+            for (let i = 0; i < 5; i++) {
+                const dayDate = new Date(mondayOfWeek);
+                dayDate.setDate(mondayOfWeek.getDate() + i);
+                if (weekOffset === 0 && dayDate < todayM) continue; // saltar días pasados de esta semana
+                const dow = i + 1; // 1=Lun … 5=Vie
+                const hasOverlap = schedule.some(s => {
+                    const sWeek = s.week === null ? undefined : s.week;
+                    return (
+                        s.dayOfWeek === dow &&
+                        (sWeek === undefined || sWeek === weekOffset) &&
+                        s.specificDate === null &&
+                        newStart < s.endTime && newEnd > s.startTime
+                    );
+                });
+                if (!hasOverlap) daysToCreate.push(dow);
+            }
+
+            if (daysToCreate.length === 0) {
+                toast.error("Ya existe un horario solapado en todos los días de esa semana.");
+                return;
+            }
+
+            daysToCreate.forEach(dow =>
+                addScheduleSlot(specId, {
+                    dayOfWeek: dow,
+                    startTime: newStart,
+                    endTime: newEnd,
+                    available: true,
+                    week: weekOffset,
+                    specificDate: undefined,
+                })
+            );
+
+            setShow(false); setEditingSlotId(null);
+            toast.success(
+                `${daysToCreate.length} horarios agregados para ${weekOffset === 0 ? "esta semana" : "la próxima semana"}`
+            );
+            return;
+        }
+
+        // ── Modo día único: "Solo este día" o "Siempre" ──
         const dayInt = parseInt(String(newDay));
         const isSpecificDate = newWeek === "date";
         const weekVal = newWeek === "both" || newWeek === "date" ? undefined : parseInt(String(newWeek));
@@ -89,7 +142,7 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
 // ─── Component ───────────────────────────────────────────
 export function SpecialistDashboard() {
     const { user } = useAuth();
-    const { specialists, specialistsLoaded, getAppointments, addScheduleSlot, addEvent, addResource, getAvailableDays, getAvailableSlots, createAppointment, addNotification } = useStore();
+    const { specialists, specialistsLoaded, getAppointments, addScheduleSlot, addEvent, deleteEvent, addResource, deleteResource, resources, events, getAvailableDays, getAvailableSlots, createAppointment, addNotification } = useStore();
 
     const spec = specialists.find(s => s.userId === user?.id);
     const dept = user?.department || "Psicología";
@@ -97,7 +150,18 @@ export function SpecialistDashboard() {
     const [activeTab, setActiveTab] = useState("calendar");
 
     const allAppts = spec ? getAppointments({ specialistId: spec.id }) : [];
-    const pendientes = allAppts.filter(a => a.status === "Pendiente");
+    const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
+
+    // Citas pasadas que siguen abiertas (Pendiente o Confirmada sin cerrar)
+    const sinCerrar = allAppts.filter(a =>
+        (a.status === "Pendiente" || a.status === "Confirmada") &&
+        new Date(a.date + "T12:00:00") < todayMidnight
+    );
+
+    // Pendientes solo de hoy en adelante
+    const pendientes = allAppts.filter(a =>
+        a.status === "Pendiente" && new Date(a.date + "T12:00:00") >= todayMidnight
+    );
     const confirmadas = allAppts.filter(a => a.status === "Confirmada");
     const completadas = allAppts.filter(a => a.status === "Completada");
     const totalPatients = new Set(allAppts.map(a => a.studentName)).size;
@@ -105,8 +169,10 @@ export function SpecialistDashboard() {
     // Calendar tab state
     const [selDate, setSelDate] = useState(new Date());
     const [activeListTab, setActiveListTab] = useState("pending");
-    const apptDates = [...new Set(allAppts.filter(a => a.status !== "Cancelada").map(a => a.date))].map(d => new Date(d + "T12:00:00"));
-    const dayAppts = allAppts.filter(a => a.date === selDate.toISOString().split("T")[0] && a.status !== "Cancelada");
+    const apptDates = [...new Set(allAppts.filter(a => a.status !== "Cancelada").map(a => a.date))]
+        .map(d => new Date(d + "T12:00:00"))
+        .filter(d => d >= todayMidnight);
+    const dayAppts = allAppts.filter(a => a.date === localISODate(selDate) && a.status !== "Cancelada");
 
     // Hooks
     const action = useActionModal();
@@ -135,7 +201,7 @@ export function SpecialistDashboard() {
 
     useEffect(() => {
         if (!seguimientoDate || !spec) { setSeguimientoSlots([]); return; }
-        getAvailableSlots(spec.id, seguimientoDate.toISOString().split("T")[0]).then(setSeguimientoSlots);
+        getAvailableSlots(spec.id, localISODate(seguimientoDate)).then(setSeguimientoSlots);
     }, [seguimientoDate]);
 
     const openSeguimiento = (appt: Appointment) => {
@@ -153,7 +219,7 @@ export function SpecialistDashboard() {
             department: seguimientoAppt.department,
             motivo: `Seguimiento: ${seguimientoAppt.motivo}`,
             modality: seguimientoAppt.modality,
-            preferredDate: seguimientoDate.toISOString().split("T")[0],
+            preferredDate: localISODate(seguimientoDate),
             preferredTime: seguimientoSlot,
         });
         // Notify the student about the follow-up appointment
@@ -240,8 +306,13 @@ export function SpecialistDashboard() {
         { label: "Pacientes", value: totalPatients, icon: Users, gradient: "from-violet-500 to-violet-600" },
     ];
 
+    const historialAppts = allAppts
+        .filter(a => a.status === "Completada" || a.status === "Cancelada")
+        .sort((a, b) => b.date.localeCompare(a.date));
+
     const sidebarTabs = [
         { key: "calendar", label: "Mi Calendario", icon: CalendarDays },
+        { key: "historial", label: "Historial", icon: History },
         { key: "schedules", label: "Mis Horarios", icon: Clock },
         { key: "content", label: "Publicar Contenido", icon: FileText },
         { key: "event", label: "Publicar Evento", icon: Megaphone },
@@ -254,7 +325,7 @@ export function SpecialistDashboard() {
     };
 
     return (
-        <AppShell sidebar={{ tabs: sidebarTabs, active: activeTab, onSelect: setActiveTab, badges: { calendar: pendientes.length } }}>
+        <AppShell sidebar={{ tabs: sidebarTabs, active: activeTab, onSelect: setActiveTab, badges: { calendar: pendientes.length + sinCerrar.length } }}>
             <div className="space-y-8 max-w-7xl mx-auto w-full pb-12">
 
                 {/* Header */}
@@ -279,7 +350,25 @@ export function SpecialistDashboard() {
                                 Citas — {selDate.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" })}
                             </h3>
 
-                            {/* Pending list */}
+                            {/* Citas pasadas sin cerrar */}
+                            {sinCerrar.length > 0 && (
+                                <div className="space-y-2">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className="flex h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                                        <p className="text-xs font-bold text-rose-600 uppercase tracking-wider">
+                                            Requieren cierre ({sinCerrar.length})
+                                        </p>
+                                    </div>
+                                    <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl mb-2 text-xs text-rose-700 font-medium">
+                                        Estas citas ya pasaron su fecha pero no fueron finalizadas. Por favor complétalas o cancélalas.
+                                    </div>
+                                    {sinCerrar.map(appt => (
+                                        <AppointmentCard key={appt.id} appt={appt} onAction={action.open} onReschedule={() => resch.open(appt.id)} onSeguimiento={openSeguimiento} onConfirmDirect={handleConfirmDirect} />
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Pending list — solo citas futuras */}
                             {pendientes.length > 0 && (
                                 <div className="space-y-2">
                                     <p className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">Pendientes de confirmación</p>
@@ -304,6 +393,78 @@ export function SpecialistDashboard() {
                                 </div>
                             )}
                         </div>
+                    </div>
+                )}
+
+                {/* Historial Tab */}
+                {activeTab === "historial" && (
+                    <div>
+                        <div className="flex items-center justify-between mb-6">
+                            <div>
+                                <h3 className="text-2xl font-bold text-slate-900">Historial de Citas</h3>
+                                <p className="text-slate-500 font-medium mt-1">
+                                    {completadas.length} completadas · {allAppts.filter(a => a.status === "Cancelada").length} canceladas
+                                </p>
+                            </div>
+                        </div>
+
+                        {historialAppts.length === 0 ? (
+                            <div className="bg-white rounded-3xl border border-dashed border-slate-200 p-12 text-center">
+                                <History className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                                <p className="text-slate-500 font-medium">Sin historial de citas aún</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {historialAppts.map(appt => {
+                                    const isLate = appt.status === "Completada" &&
+                                        appt.updatedAt &&
+                                        appt.updatedAt.split("T")[0] > appt.date;
+                                    const isFollowUp = appt.motivo?.startsWith("Seguimiento:");
+                                    return (
+                                        <div key={appt.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col sm:flex-row sm:items-start gap-3 opacity-90 hover:opacity-100 hover:shadow-md transition-all">
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                    <p className="font-bold text-slate-900 text-sm">{appt.studentName}</p>
+                                                    <StatusBadge status={appt.status} />
+                                                    {isLate && (
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[0.65rem] font-bold border border-amber-200">
+                                                            Sesión tardía
+                                                        </span>
+                                                    )}
+                                                    {isFollowUp && (
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[0.65rem] font-bold border border-indigo-200">
+                                                            <ArrowRight className="w-2.5 h-2.5" /> Seguimiento
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <p className="text-slate-400 text-xs">
+                                                    {new Date(appt.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} — {appt.time}
+                                                </p>
+                                                <p className="text-slate-400 text-xs mt-0.5">{appt.modality} · {isFollowUp ? appt.motivo.replace("Seguimiento: ", "") : appt.motivo}</p>
+                                                {appt.status === "Completada" && appt.notes && (
+                                                    <div className="mt-2 flex items-start gap-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                                                        <ClipboardList className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
+                                                        <div>
+                                                            <p className="text-[0.65rem] font-bold text-indigo-400 uppercase tracking-wider mb-0.5">Notas clínicas</p>
+                                                            <p className="text-slate-600 text-xs leading-relaxed whitespace-pre-wrap">{appt.notes}</p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {appt.status === "Completada" && (
+                                                <button
+                                                    onClick={() => openSeguimiento(appt)}
+                                                    style={{ background: "#eef2ff", color: "#4338ca", border: "1px solid #c7d2fe" }}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:opacity-80 cursor-pointer shrink-0 self-start"
+                                                >
+                                                    <ArrowRight className="w-3.5 h-3.5" /> Seguimiento
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -364,7 +525,7 @@ export function SpecialistDashboard() {
                                             const dow = i + 1;
                                             const dateObj = new Date(mondayOfCurrentWeek);
                                             dateObj.setDate(mondayOfCurrentWeek.getDate() + i);
-                                            const isoDate = dateObj.toISOString().split("T")[0];
+                                            const isoDate = localISODate(dateObj);
                                             const dateStr = `${dateObj.getDate()} ${dateObj.toLocaleDateString("es-MX", { month: "short" })}`.replace(".", "");
                                             const isPast = dateObj < new Date(new Date().setHours(0, 0, 0, 0));
 
@@ -465,19 +626,19 @@ export function SpecialistDashboard() {
                                             {
                                                 value: "0",
                                                 label: "Esta semana",
-                                                desc: `Todos los ${DAYS_FULL[Number(slots.newDay)]} de la semana actual`,
+                                                desc: `Añade ${slots.newStart}–${slots.newEnd} a todos los días hábiles disponibles de esta semana`,
                                                 color: "indigo",
                                             },
                                             {
                                                 value: "1",
                                                 label: "Próxima semana",
-                                                desc: `Todos los ${DAYS_FULL[Number(slots.newDay)]} de la semana siguiente`,
+                                                desc: `Añade ${slots.newStart}–${slots.newEnd} a los 5 días hábiles de la próxima semana`,
                                                 color: "violet",
                                             },
                                             {
                                                 value: "both",
-                                                label: "Siempre",
-                                                desc: `Todos los ${DAYS_FULL[Number(slots.newDay)]} de todas las semanas`,
+                                                label: "Siempre (recurrente)",
+                                                desc: `Todos los ${DAYS_FULL[Number(slots.newDay)]} de forma permanente`,
                                                 color: "emerald",
                                             },
                                         ].map(opt => (
@@ -531,169 +692,232 @@ export function SpecialistDashboard() {
 
                 {/* Publish Content Tab */}
                 {activeTab === "content" && (
-                    <div className="max-w-2xl">
-                        <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Material Educativo</h3>
-                        <p className="text-slate-500 font-medium mb-8">Comparte recursos con los estudiantes de la facultad.</p>
-                        <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
-                            <div>
-                                <label className="block mb-2 text-slate-900 font-bold text-sm">Título <span className="text-rose-500">*</span></label>
-                                <input type="text" value={ctitle} onChange={e => setCtitle(e.target.value)} placeholder="Ej. Guía para el manejo de ansiedad" className={inputCls} />
-                            </div>
-                            <div>
-                                <label className="block mb-2 text-slate-900 font-bold text-sm">Descripción</label>
-                                <textarea value={cdesc} onChange={e => setCdesc(e.target.value)} className={`${inputCls} resize-none`} rows={3} />
-                            </div>
-
-                            {/* Type selector */}
-                            <div>
-                                <label className="block mb-2 text-slate-900 font-bold text-sm">Tipo de recurso</label>
-                                <div className="grid grid-cols-3 gap-3">
-                                    {[
-                                        { key: "video", label: "Video", icon: Video, color: "rose" },
-                                        { key: "image", label: "Infografía", icon: ImageIcon, color: "emerald" },
-                                        { key: "link", label: "Enlace", icon: ExternalLink, color: "blue" },
-                                    ].map(t => (
-                                        <button key={t.key} onClick={() => { setCtype(t.key); setCurl(""); setSelectedFile(null); }}
-                                            className={`flex flex-col items-center gap-2 p-4 border-2 rounded-2xl cursor-pointer transition-all ${ctype === t.key ? `border-${t.color}-500 bg-${t.color}-50` : "border-slate-200 bg-white hover:border-slate-300"}`}>
-                                            <t.icon className={`w-6 h-6 ${ctype === t.key ? `text-${t.color}-600` : "text-slate-400"}`} />
-                                            <span className={`text-xs font-bold ${ctype === t.key ? `text-${t.color}-700` : "text-slate-500"}`}>{t.label}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Image type: file upload for the image itself */}
-                            {ctype === "image" && (
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
+                        {/* ── Form ── */}
+                        <div>
+                            <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Material Educativo</h3>
+                            <p className="text-slate-500 font-medium mb-6">Comparte recursos con los estudiantes de la facultad.</p>
+                            <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
                                 <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">
-                                        Imagen / Infografía <span className="text-rose-500">*</span>
-                                    </label>
-                                    <div className="relative flex items-center gap-4 p-4 bg-white border-2 border-dashed border-emerald-200 rounded-2xl hover:border-emerald-400 transition-colors cursor-pointer">
-                                        <input type="file" accept="image/*" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                                        {selectedFile ? (
-                                            <>
-                                                <img src={URL.createObjectURL(selectedFile)} alt="" className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0" />
-                                                <div>
-                                                    <p className="text-sm font-bold text-slate-700">{selectedFile.name}</p>
-                                                    <p className="text-xs text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB — haz clic para cambiar</p>
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <div className="w-16 h-16 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-100 shrink-0">
-                                                    <ImageIcon className="w-7 h-7 text-emerald-400" />
-                                                </div>
-                                                <div>
-                                                    <p className="text-sm font-bold text-slate-700">Subir imagen o infografía</p>
-                                                    <p className="text-xs text-slate-400">JPG, PNG, WEBP. Recomendado: 800×400px</p>
-                                                </div>
-                                            </>
-                                        )}
+                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Título <span className="text-rose-500">*</span></label>
+                                    <input type="text" value={ctitle} onChange={e => setCtitle(e.target.value)} placeholder="Ej. Guía para el manejo de ansiedad" className={inputCls} />
+                                </div>
+                                <div>
+                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Descripción</label>
+                                    <textarea value={cdesc} onChange={e => setCdesc(e.target.value)} className={`${inputCls} resize-none`} rows={3} />
+                                </div>
+                                <div>
+                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Tipo de recurso</label>
+                                    <div className="grid grid-cols-3 gap-3">
+                                        {[
+                                            { key: "video", label: "Video", icon: Video, color: "rose" },
+                                            { key: "image", label: "Infografía", icon: ImageIcon, color: "emerald" },
+                                            { key: "link", label: "Enlace", icon: ExternalLink, color: "blue" },
+                                        ].map(t => (
+                                            <button key={t.key} onClick={() => { setCtype(t.key); setCurl(""); setSelectedFile(null); }}
+                                                className={`flex flex-col items-center gap-2 p-4 border-2 rounded-2xl cursor-pointer transition-all ${ctype === t.key ? `border-${t.color}-500 bg-${t.color}-50` : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                                                <t.icon className={`w-6 h-6 ${ctype === t.key ? `text-${t.color}-600` : "text-slate-400"}`} />
+                                                <span className={`text-xs font-bold ${ctype === t.key ? `text-${t.color}-700` : "text-slate-500"}`}>{t.label}</span>
+                                            </button>
+                                        ))}
                                     </div>
                                 </div>
-                            )}
-
-                            {/* Video type: URL field + optional file */}
-                            {ctype === "video" && (
-                                <div className="space-y-4">
+                                {ctype === "image" && (
                                     <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">
-                                            URL del video <span className="text-rose-500">*</span>
-                                            <span className="text-slate-400 font-normal ml-2 text-xs">(YouTube, Vimeo, etc.)</span>
-                                        </label>
-                                        <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://youtube.com/watch?v=..." className={inputCls} />
+                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Imagen / Infografía <span className="text-rose-500">*</span></label>
+                                        <div className="relative flex items-center gap-4 p-4 bg-white border-2 border-dashed border-emerald-200 rounded-2xl hover:border-emerald-400 transition-colors cursor-pointer">
+                                            <input type="file" accept="image/*" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
+                                            {selectedFile ? (
+                                                <>
+                                                    <img src={URL.createObjectURL(selectedFile)} alt="" className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0" />
+                                                    <div><p className="text-sm font-bold text-slate-700">{selectedFile.name}</p><p className="text-xs text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB — haz clic para cambiar</p></div>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <div className="w-16 h-16 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-100 shrink-0"><ImageIcon className="w-7 h-7 text-emerald-400" /></div>
+                                                    <div><p className="text-sm font-bold text-slate-700">Subir imagen o infografía</p><p className="text-xs text-slate-400">JPG, PNG, WEBP. Recomendado: 800×400px</p></div>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Archivo adjunto (opcional)</label>
-                                        <div className="relative flex items-center gap-3 p-4 bg-white border border-slate-200 rounded-xl hover:border-rose-300 transition-colors cursor-pointer">
-                                            <input type="file" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                                            <Plus className="w-5 h-5 text-slate-400" />
-                                            <div>
-                                                <p className="text-sm font-bold text-slate-700">{selectedFile ? selectedFile.name : "Subir archivo complementario"}</p>
-                                                {selectedFile && <p className="text-xs text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB</p>}
+                                )}
+                                {ctype === "video" && (
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block mb-1 text-slate-900 font-bold text-sm">Enlace del video <span className="text-rose-500">*</span></label>
+                                            <p className="text-xs text-slate-400 mb-2">Pega la URL de YouTube o Vimeo. Los alumnos verán el video integrado directamente en la plataforma.</p>
+                                            <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://youtube.com/watch?v=... o https://vimeo.com/..." className={inputCls} />
+                                        </div>
+                                        <div>
+                                            <label className="block mb-2 text-slate-900 font-bold text-sm">Archivo adjunto (opcional)</label>
+                                            <div className="relative flex items-center gap-3 p-4 bg-white border border-slate-200 rounded-xl hover:border-rose-300 transition-colors cursor-pointer">
+                                                <input type="file" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
+                                                <Plus className="w-5 h-5 text-slate-400" />
+                                                <div>
+                                                    <p className="text-sm font-bold text-slate-700">{selectedFile ? selectedFile.name : "Subir archivo complementario"}</p>
+                                                    {selectedFile && <p className="text-xs text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB</p>}
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
-                                </div>
-                            )}
+                                )}
+                                {ctype === "link" && (
+                                    <div>
+                                        <label className="block mb-2 text-slate-900 font-bold text-sm">URL del enlace <span className="text-rose-500">*</span></label>
+                                        <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://..." className={inputCls} />
+                                    </div>
+                                )}
+                                <Btn onClick={handlePublishContent} size="lg" className="w-full">
+                                    <FileText className="w-5 h-5" /> Publicar Material
+                                </Btn>
+                            </div>
+                        </div>
 
-                            {/* Link type: URL field */}
-                            {ctype === "link" && (
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">
-                                        URL del enlace <span className="text-rose-500">*</span>
-                                    </label>
-                                    <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://..." className={inputCls} />
-                                </div>
-                            )}
-
-                            <Btn onClick={handlePublishContent} size="lg" className="w-full">
-                                <FileText className="w-5 h-5" /> Publicar Material
-                            </Btn>
+                        {/* ── Published resources for this dept ── */}
+                        <div>
+                            <h3 className="text-xl font-bold text-slate-900 mb-4">Material publicado — {dept}</h3>
+                            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                                {resources.filter(r => r.department === dept).length === 0 ? (
+                                    <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-100 rounded-2xl">
+                                        <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                                        <p className="text-sm font-medium">Sin material publicado en {dept}</p>
+                                    </div>
+                                ) : (
+                                    resources.filter(r => r.department === dept).map(r => (
+                                        <div key={r.id} className="flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow group">
+                                            <div className={`p-2 rounded-lg shrink-0 ${r.type === "video" ? "bg-rose-50" : r.type === "link" ? "bg-blue-50" : "bg-emerald-50"}`}>
+                                                {r.type === "video" && <Video className="w-4 h-4 text-rose-500" />}
+                                                {r.type === "link" && <ExternalLink className="w-4 h-4 text-blue-500" />}
+                                                {r.type === "image" && <ImageIcon className="w-4 h-4 text-emerald-500" />}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-bold text-slate-800 truncate">{r.title}</p>
+                                                {r.description && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{r.description}</p>}
+                                                <span className="text-[0.65rem] uppercase tracking-wider font-bold text-slate-400">{r.type}</span>
+                                            </div>
+                                            <button onClick={() => deleteResource(r.id)} title="Eliminar"
+                                                className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer shrink-0">
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}
 
                 {/* Publish Event Tab */}
                 {activeTab === "event" && (
-                    <div className="max-w-2xl">
-                        <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Evento o Taller</h3>
-                        <p className="text-slate-500 font-medium mb-8">Crea un banner que aparecerá en el carrusel principal de estudiantes.</p>
-                        <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
-                            <div>
-                                <label className="block mb-2 text-slate-900 font-bold text-sm">Formato</label>
-                                <div className="grid grid-cols-2 gap-3">
-                                    {["taller", "conferencia"].map(t => (
-                                        <button key={t} onClick={() => setEvType(t)}
-                                            className={`py-3 rounded-xl border-2 cursor-pointer capitalize font-bold text-sm transition-all ${evType === t ? "border-violet-600 bg-violet-50 text-violet-700 shadow-sm" : "border-slate-200 bg-white text-slate-500"}`}>
-                                            {t}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block mb-2 text-slate-900 font-bold text-sm">Título <span className="text-rose-500">*</span></label>
-                                <input type="text" value={evTitle} onChange={e => setEvTitle(e.target.value)} placeholder="Ej. Taller de Organización" className={inputCls} />
-                            </div>
-                            <div>
-                                <label className="block mb-2 text-slate-900 font-bold text-sm">Descripción</label>
-                                <textarea value={evDesc} onChange={e => setEvDesc(e.target.value)} className={`${inputCls} resize-none`} rows={3} />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
+                        {/* ── Form ── */}
+                        <div>
+                            <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Evento o Taller</h3>
+                            <p className="text-slate-500 font-medium mb-6">Crea un banner que aparecerá en el carrusel principal de estudiantes.</p>
+                            <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
                                 <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Fecha <span className="text-rose-500">*</span></label>
-                                    <input type="date" value={evDate} onChange={e => setEvDate(e.target.value)} className={inputCls} />
+                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Formato</label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {["taller", "conferencia"].map(t => (
+                                            <button key={t} onClick={() => setEvType(t)}
+                                                className={`py-3 rounded-xl border-2 cursor-pointer capitalize font-bold text-sm transition-all ${evType === t ? "border-violet-600 bg-violet-50 text-violet-700 shadow-sm" : "border-slate-200 bg-white text-slate-500"}`}>
+                                                {t}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                                 <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Hora</label>
-                                    <input type="time" value={evTime} onChange={e => setEvTime(e.target.value)} className={inputCls} />
+                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Título <span className="text-rose-500">*</span></label>
+                                    <input type="text" value={evTitle} onChange={e => setEvTitle(e.target.value)} placeholder="Ej. Taller de Organización" className={inputCls} />
                                 </div>
-                            </div>
-                            <div>
-                                <label className="block mb-2 text-slate-900 font-bold text-sm">Imagen de portada</label>
-                                <div className="relative flex items-center gap-4 p-5 bg-white border border-slate-200 rounded-2xl hover:border-violet-400 transition-colors cursor-pointer">
-                                    <input type="file" accept="image/*" onChange={e => setSelectedEventImg(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                                    <div className="w-20 h-20 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-100">
-                                        {selectedEventImg
-                                            ? <img src={URL.createObjectURL(selectedEventImg)} className="w-full h-full object-cover" alt="" />
-                                            : <ImageIcon className="w-8 h-8 text-slate-400" />
-                                        }
+                                <div>
+                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Descripción</label>
+                                    <textarea value={evDesc} onChange={e => setEvDesc(e.target.value)} className={`${inputCls} resize-none`} rows={3} />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Fecha <span className="text-rose-500">*</span></label>
+                                        <input type="date" value={evDate} onChange={e => setEvDate(e.target.value)} className={inputCls} />
                                     </div>
                                     <div>
-                                        <p className="text-sm font-bold text-slate-700">{selectedEventImg ? selectedEventImg.name : "Subir imagen"}</p>
-                                        <p className="text-xs text-slate-400">JPG, PNG. Recomendado: 800×400px</p>
+                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Hora</label>
+                                        <input type="time" value={evTime} onChange={e => setEvTime(e.target.value)} className={inputCls} />
                                     </div>
                                 </div>
-                            </div>
-                            {evType === "taller" && (
                                 <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Enlace de registro <span className="text-rose-500">*</span></label>
-                                    <input type="url" value={evRegUrl} onChange={e => setEvRegUrl(e.target.value)} placeholder="https://forms.gle/..." className={inputCls} />
+                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Imagen de portada</label>
+                                    <div className="relative flex items-center gap-4 p-5 bg-white border border-slate-200 rounded-2xl hover:border-violet-400 transition-colors cursor-pointer">
+                                        <input type="file" accept="image/*" onChange={e => setSelectedEventImg(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
+                                        <div className="w-20 h-20 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-100">
+                                            {selectedEventImg ? <img src={URL.createObjectURL(selectedEventImg)} className="w-full h-full object-cover" alt="" /> : <ImageIcon className="w-8 h-8 text-slate-400" />}
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-bold text-slate-700">{selectedEventImg ? selectedEventImg.name : "Subir imagen"}</p>
+                                            <p className="text-xs text-slate-400">JPG, PNG. Recomendado: 800×400px</p>
+                                        </div>
+                                    </div>
                                 </div>
-                            )}
-                            <Btn onClick={handlePublishEvent} size="lg" className="w-full bg-violet-600 hover:bg-violet-700">
-                                <Megaphone className="w-5 h-5" /> Publicar Evento
-                            </Btn>
+                                {evType === "taller" && (
+                                    <div>
+                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Enlace de registro <span className="text-rose-500">*</span></label>
+                                        <input type="url" value={evRegUrl} onChange={e => setEvRegUrl(e.target.value)} placeholder="https://forms.gle/..." className={inputCls} />
+                                    </div>
+                                )}
+                                <Btn onClick={handlePublishEvent} size="lg" className="w-full bg-violet-600 hover:bg-violet-700">
+                                    <Megaphone className="w-5 h-5" /> Publicar Evento
+                                </Btn>
+                            </div>
+                        </div>
+
+                        {/* ── Published events for this dept ── */}
+                        <div>
+                            <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center"><CheckCircle2 className="w-4 h-4 text-emerald-600" /></div>
+                                Eventos publicados — {dept} ({events.filter(e => e.department === dept).length})
+                            </h3>
+                            <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
+                                {events.filter(e => e.department === dept).length === 0 ? (
+                                    <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-100 rounded-2xl">
+                                        <Megaphone className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                                        <p className="text-sm font-medium">Sin eventos publicados en {dept}</p>
+                                    </div>
+                                ) : (
+                                    events.filter(e => e.department === dept).map(ev => (
+                                        <div key={ev.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
+                                            {ev.imageUrl && (
+                                                <div className="h-28 bg-slate-100 overflow-hidden relative">
+                                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/50 to-transparent z-10" />
+                                                    <img src={ev.imageUrl} alt={ev.title} className="w-full h-full object-cover"
+                                                        onError={(e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                                                    <span className={`absolute bottom-2 left-2 z-20 px-2 py-0.5 rounded-md font-bold text-[0.6rem] uppercase ${ev.type === "conferencia" ? "bg-violet-500 text-white" : "bg-blue-500 text-white"}`}>
+                                                        {ev.type === "conferencia" ? "Conferencia" : "Taller"}
+                                                    </span>
+                                                    <button onClick={() => deleteEvent(ev.id)} title="Eliminar"
+                                                        className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all cursor-pointer shadow">
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            )}
+                                            <div className="p-3 flex items-start justify-between gap-2">
+                                                <div>
+                                                    <p className="text-slate-900 font-bold text-sm leading-tight">{ev.title}</p>
+                                                    <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
+                                                        <CalendarDays className="w-3 h-3" />
+                                                        {new Date(ev.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short" })}
+                                                        {ev.time ? ` • ${ev.time}` : ""}
+                                                    </p>
+                                                </div>
+                                                {!ev.imageUrl && (
+                                                    <button onClick={() => deleteEvent(ev.id)} title="Eliminar"
+                                                        className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer shrink-0">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -880,6 +1104,13 @@ function AppointmentCard({
     onSeguimiento: (a: Appointment) => void;
     onConfirmDirect: (a: Appointment) => void;
 }) {
+    const apptDateTime = new Date(`${appt.date}T${appt.time}:00`);
+    const now = new Date();
+    const todayM = new Date(); todayM.setHours(0, 0, 0, 0);
+    const apptDateMidnight = new Date(appt.date + "T12:00:00");
+    const isApptPast = apptDateMidnight < todayM;
+    const hoursUntilAppt = (apptDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+    const isWithin24h = hoursUntilAppt >= 0 && hoursUntilAppt < 24;
     const isFollowUp = appt.motivo?.startsWith("Seguimiento:");
 
     return (
@@ -903,38 +1134,57 @@ function AppointmentCard({
                 )}
                 {/* Clinical notes — visible only to specialist */}
                 {appt.status === "Completada" && appt.notes && (
-                    <div className="mt-2 flex items-start gap-1.5 p-2 bg-slate-50 rounded-lg border border-slate-100">
-                        <ClipboardList className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                        <p className="text-slate-500 text-xs leading-relaxed line-clamp-2">{appt.notes}</p>
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                        <ClipboardList className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-[0.65rem] font-bold text-indigo-400 uppercase tracking-wider mb-0.5">Notas clínicas</p>
+                            <p className="text-slate-600 text-xs leading-relaxed whitespace-pre-wrap">{appt.notes}</p>
+                        </div>
                     </div>
                 )}
             </div>
 
             <div className="flex items-center gap-2 flex-wrap justify-end">
-                {/* Pendiente: confirm directly + reschedule + cancel */}
+                {/* Pendiente: confirm directly + reschedule (solo si no es pasada) + cancel */}
                 {appt.status === "Pendiente" && (
                     <>
                         <Btn size="sm" variant="emerald" onClick={() => onConfirmDirect(appt)}>
                             <CheckCircle2 className="w-3.5 h-3.5" /> Confirmar
                         </Btn>
-                        <Btn size="sm" variant="ghost" onClick={onReschedule}>
-                            <RefreshCw className="w-3.5 h-3.5" /> Reagendar
-                        </Btn>
-                        <Btn size="sm" variant="rose" onClick={() => onAction(appt, "Cancelada")}>Cancelar</Btn>
+                        {!isApptPast && (
+                            <Btn size="sm" variant="ghost" onClick={onReschedule}>
+                                <RefreshCw className="w-3.5 h-3.5" /> Reagendar
+                            </Btn>
+                        )}
+                        {isWithin24h ? (
+                            <span className="text-xs text-amber-600 font-medium px-2 py-1 bg-amber-50 rounded-lg border border-amber-200 flex items-center gap-1">
+                                <Lock className="w-3 h-3" /> &lt;24h
+                            </span>
+                        ) : (
+                            <Btn size="sm" variant="rose" onClick={() => onAction(appt, "Cancelada")}>Cancelar</Btn>
+                        )}
                     </>
                 )}
 
-                {/* Confirmada: complete (opens notes modal) + reschedule + cancel */}
+                {/* Confirmada: complete + reschedule (solo si no es pasada) + cancel */}
                 {appt.status === "Confirmada" && (
                     <>
                         <Btn size="sm" onClick={() => onAction(appt, "Completada")}
                             className="bg-indigo-600 hover:bg-indigo-700 text-white border-0 shadow-sm">
                             <CheckCircle2 className="w-3.5 h-3.5" /> Completar
                         </Btn>
-                        <Btn size="sm" variant="ghost" onClick={onReschedule}>
-                            <RefreshCw className="w-3.5 h-3.5" /> Reagendar
-                        </Btn>
-                        <Btn size="sm" variant="rose" onClick={() => onAction(appt, "Cancelada")}>Cancelar</Btn>
+                        {!isApptPast && (
+                            <Btn size="sm" variant="ghost" onClick={onReschedule}>
+                                <RefreshCw className="w-3.5 h-3.5" /> Reagendar
+                            </Btn>
+                        )}
+                        {isWithin24h ? (
+                            <span className="text-xs text-amber-600 font-medium px-2 py-1 bg-amber-50 rounded-lg border border-amber-200 flex items-center gap-1">
+                                <Lock className="w-3 h-3" /> &lt;24h
+                            </span>
+                        ) : (
+                            <Btn size="sm" variant="rose" onClick={() => onAction(appt, "Cancelada")}>Cancelar</Btn>
+                        )}
                     </>
                 )}
 

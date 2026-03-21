@@ -185,7 +185,7 @@ export function Modal({ open, onClose, title, subtitle, children, maxWidth = "ma
                 <div className="flex items-start justify-between p-6 border-b border-slate-100">
                     <div>
                         <h3 className="text-xl font-semibold text-slate-900">{title}</h3>
-                        {subtitle && <p className="text-slate-500 mt-1 text-sm">{subtitle}</p>}
+                        {subtitle && <div className="text-slate-500 mt-1 text-sm">{subtitle}</div>}
                     </div>
                     <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-2 rounded-xl hover:bg-slate-100 transition-colors shrink-0 cursor-pointer">
                         <X className="w-5 h-5" />

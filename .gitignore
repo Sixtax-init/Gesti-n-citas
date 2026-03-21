@@ -21,3 +21,6 @@ dist/
 *.log
 *.txt
 uploads/
+
+.claude
+.claude/settings.local.json
