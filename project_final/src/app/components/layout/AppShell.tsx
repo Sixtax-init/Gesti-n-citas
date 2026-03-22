@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { CalendarCheck, Bell, LogOut, X, Menu, Trash2 } from "lucide-react";
+import { CalendarCheck, Bell, LogOut, X, Menu, Trash2, Moon, Sun } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
+import { useTheme } from "../../hooks/useTheme";
 import { Avatar, NotifIcon } from "../ui";
 
 interface SidebarTab {
@@ -34,6 +35,7 @@ export function AppShell({ children, sidebar }: AppShellProps) {
 
     const [showNotif, setShowNotif] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const { dark, toggle: toggleDark } = useTheme();
 
     if (!user) return null;
 
@@ -47,11 +49,11 @@ export function AppShell({ children, sidebar }: AppShellProps) {
     };
 
     return (
-        <div className="min-h-screen bg-slate-50 flex font-sans">
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex font-sans transition-colors duration-300">
 
             {/* ── Sidebar desktop ── */}
             {sidebar && (
-                <aside className="hidden md:flex w-64 bg-slate-900 flex-col shrink-0 sticky top-0 h-screen">
+                <aside className="hidden md:flex w-64 bg-slate-900 dark:bg-slate-950 flex-col shrink-0 sticky top-0 h-screen">
                     <div className="h-16 flex items-center gap-3 px-5 border-b border-white/10">
                         <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shadow-md">
                             <CalendarCheck className="w-4 h-4 text-white" />
@@ -124,7 +126,7 @@ export function AppShell({ children, sidebar }: AppShellProps) {
             <div className="flex-1 flex flex-col min-w-0 h-[100dvh] overflow-hidden">
 
                 {/* Header */}
-                <header className="h-16 bg-white border-b border-slate-200 shadow-sm flex items-center justify-between px-4 sm:px-6 shrink-0 z-30">
+                <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between px-4 sm:px-6 shrink-0 z-30">
 
                     {/* Left */}
                     <div className="flex items-center gap-2 sm:gap-3">
@@ -149,6 +151,14 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                     {/* Right */}
                     <div className="flex items-center gap-2 sm:gap-6">
 
+                        {/* ── Dark mode toggle ── */}
+                        <button
+                            onClick={toggleDark}
+                            title={dark ? "Modo claro" : "Modo oscuro"}
+                            className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer">
+                            {dark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                        </button>
+
                         {/* ── Bell ── */}
                         <div className="relative">
                             <button onClick={handleToggleNotif}
@@ -165,7 +175,7 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                             {showNotif && (
                                 <>
                                     <div className="fixed inset-0 z-40" onClick={() => setShowNotif(false)} />
-                                    <div className="absolute right-0 top-full mt-3 w-80 sm:w-96 bg-white border border-slate-100 rounded-2xl shadow-xl shadow-slate-200/50 z-50 overflow-hidden animate-in fade-in slide-in-from-top-4 duration-200">
+                                    <div className="absolute right-0 top-full mt-3 w-[min(24rem,calc(100vw-1rem))] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-xl shadow-slate-200/50 z-50 overflow-hidden animate-in fade-in slide-in-from-top-4 duration-200">
 
                                         {/* Panel header */}
                                         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50/50">
@@ -249,8 +259,8 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                         {/* User chip */}
                         <div className="flex items-center gap-3">
                             <div className="text-right hidden sm:block">
-                                <p className="text-slate-900 font-semibold text-sm leading-tight">{user.name}</p>
-                                <p className="text-slate-500 text-xs font-medium">
+                                <p className="text-slate-900 dark:text-white font-semibold text-sm leading-tight">{user.name}</p>
+                                <p className="text-slate-500 dark:text-slate-400 text-xs font-medium">
                                     {roleLabel}{user.department ? ` - ${user.department}` : ""}
                                 </p>
                             </div>
@@ -265,7 +275,7 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                 </header>
 
                 {/* Page content */}
-                <main className="flex-1 overflow-y-auto bg-slate-50 p-4 sm:p-6 lg:p-8">
+                <main className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-950 p-4 sm:p-6 lg:p-8">
                     <div className="max-w-7xl mx-auto space-y-6">{children}</div>
                 </main>
             </div>

@@ -1,5 +1,3 @@
-import React from 'react';
-
 export interface ScheduleSlot {
   id: string;
   dayOfWeek: number;
@@ -49,6 +47,7 @@ export interface Appointment {
   motivo: string;
   notes?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface AppEvent {
@@ -75,6 +74,18 @@ export interface Resource {
   fileName?: string;
 }
 
+/** Datos para crear o actualizar un especialista. */
+export interface SpecialistInput {
+  name: string;
+  department: string;
+  email: string;
+  active?: boolean;
+  shift?: string;
+  // Campos del usuario asociado (solo en creación)
+  password?: string;
+  role?: string;
+}
+
 export interface AppointmentFilters {
   studentId?: string;
   specialistId?: string;
@@ -95,12 +106,11 @@ export interface StoreContextType {
   users: User[];
   specialistsLoaded: boolean;
   getUserById: (id: string) => User | null;
-  loginUser: (email: string, password: string) => User | null;
   specialists: Specialist[];
   getSpecialists: (dept?: string) => Specialist[];
   getSpecialistById: (id: string) => Specialist | null;
-  addSpecialist: (data: any) => Promise<void>;
-  updateSpecialist: (id: string, data: any) => Promise<void>;
+  addSpecialist: (data: SpecialistInput) => Promise<void>;
+  updateSpecialist: (id: string, data: Partial<SpecialistInput>) => Promise<void>;
   removeSpecialist: (id: string) => Promise<void>;
   appointments: Appointment[];
   getAppointments: (filters?: AppointmentFilters) => Appointment[];
@@ -113,8 +123,10 @@ export interface StoreContextType {
   removeScheduleSlot: (specialistId: string, slotId: string) => void;
   events: AppEvent[];
   addEvent: (ev: Omit<AppEvent, "id">, file?: File) => Promise<void>;
+  deleteEvent: (id: string) => Promise<void>;
   resources: Resource[];
   addResource: (r: Omit<Resource, "id">, file?: File) => Promise<void>;
+  deleteResource: (id: string) => Promise<void>;
   getStats: () => {
     summary: { total: number; pendientes: number; confirmadas: number; completadas: number; canceladas: number; byDept: Record<string, number> };
     charts: {
@@ -130,6 +142,7 @@ export interface StoreContextType {
   deleteNotification: (userId: string, notifId: string) => void;
   clearAllNotifications: (userId: string) => void;
   deleteUser: (id: string) => Promise<void>;
+  fetchAll: () => Promise<void>;
 }
 
 export interface AuthContextType {

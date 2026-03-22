@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { AuthContextType, User } from "../types";
+import { API_BASE } from "../lib/api";
 
 export const AuthContext = createContext<AuthContextType | null>(null);
 
@@ -14,10 +15,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // Verificar si el token ya expiró antes de hacer la petición
     try {
-      const res = await fetch('http://localhost:3000/api/auth/me', {
-        headers: { 
-          'Authorization': `Bearer ${token}` 
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      if (payload.exp * 1000 < Date.now()) {
+        localStorage.removeItem('token');
+        setLoading(false);
+        return;
+      }
+    } catch {
+      localStorage.removeItem('token');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/me`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
         }
       });
 
@@ -41,7 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     try {
-      const res = await fetch('http://localhost:3000/api/auth/login', {
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
@@ -61,16 +76,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = useCallback(async (data: Partial<User>) => {
     try {
-      const res = await fetch('http://localhost:3000/api/auth/register', {
+      const res = await fetch(`${API_BASE}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
       if (res.ok) {
         const result = await res.json();
+        localStorage.setItem('token', result.token);
         setUser(result.user);
-        // Note: typically we might auto-login or just expect them to login next. 
-        // Returning true allows the UI to proceed.
         return true;
       }
       return false;

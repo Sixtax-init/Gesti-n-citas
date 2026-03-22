@@ -1,28 +1,25 @@
 import { Router } from 'express';
 import { prisma } from '../db';
+import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 
 const router = Router();
 
 // GET /api/appointments
-router.get('/', async (req, res) => {
+router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const { studentId, specialistId, department, status } = req.query;
-    
-    // Build query dynamically
+
     const where: any = {};
     if (studentId) where.studentId = studentId;
     if (specialistId) where.specialistId = specialistId;
     if (department) where.department = department;
     if (status) where.status = status;
-    
+
     const appointments = await prisma.appointment.findMany({
       where,
-      orderBy: [
-        { date: 'asc' },
-        { time: 'asc' }
-      ]
+      orderBy: [{ date: 'asc' }, { time: 'asc' }]
     });
-    
+
     res.json(appointments);
   } catch (error) {
     console.error('Error fetching appointments:', error);
@@ -31,17 +28,14 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/appointments
-router.post('/', async (req, res) => {
+router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const data = req.body;
-    
-    // Basic validation
+
     if (!data.studentId || !data.specialistId || !data.date || !data.time) {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
-    
-    // In a real scenario we might check for schedule conflicts here
-    
+
     const appointment = await prisma.appointment.create({
       data: {
         studentId: data.studentId,
@@ -57,7 +51,7 @@ router.post('/', async (req, res) => {
         notes: data.notes
       }
     });
-    
+
     res.status(201).json(appointment);
   } catch (error) {
     console.error('Error creating appointment:', error);
@@ -66,19 +60,19 @@ router.post('/', async (req, res) => {
 });
 
 // PATCH /api/appointments/:id/status
-router.patch('/:id/status', async (req, res) => {
+router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { status, notes } = req.body;
-    
+
     const appointment = await prisma.appointment.update({
       where: { id },
-      data: { 
-        status, 
-        ...(notes !== undefined && { notes }) 
+      data: {
+        status,
+        ...(notes !== undefined && { notes })
       }
     });
-    
+
     res.json(appointment);
   } catch (error) {
     console.error('Error updating appointment:', error);
@@ -87,20 +81,20 @@ router.patch('/:id/status', async (req, res) => {
 });
 
 // PATCH /api/appointments/:id/reschedule
-router.patch('/:id/reschedule', async (req, res) => {
+router.patch('/:id/reschedule', verifyToken as any, async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { date, time, modality } = req.body;
-    
+
     const appointment = await prisma.appointment.update({
       where: { id },
-      data: { 
+      data: {
         date,
         time,
         ...(modality && { modality })
       }
     });
-    
+
     res.json(appointment);
   } catch (error) {
     console.error('Error rescheduling appointment:', error);

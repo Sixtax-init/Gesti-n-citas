@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Toaster } from "sonner";
 import { useAuth } from "../context/AuthContext";
+import { useStore } from "../context/StoreContext";
 import { LoginForm } from "./pages/auth/LoginForm";
 import { RegisterForm } from "./pages/auth/RegisterForm";
 import { StudentDashboard } from "./pages/student/StudentDashboard";
@@ -10,6 +11,11 @@ import { AdminDashboard } from "./pages/admin/AdminDashboard";
 // ─── AppRouter ───────────────────────────────────────────
 function AppRouter() {
   const { user, isAuthenticated, loading } = useAuth();
+  const { fetchAll } = useStore();
+
+  useEffect(() => {
+    if (isAuthenticated) fetchAll();
+  }, [isAuthenticated]);
   const [view, setView] = useState<"login" | "register">("login");
 
   if (loading) {

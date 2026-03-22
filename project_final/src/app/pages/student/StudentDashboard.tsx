@@ -14,6 +14,27 @@ import { DEPT_CONFIG, DEPT_REASONS } from "../../../constants";
 import { useAppointmentWizard, useReschedule, useCancelAppointment } from "../../hooks";
 import type { AppEvent } from "../../../types";
 
+function getVideoEmbedUrl(url: string): string | null {
+    try {
+        const u = new URL(url);
+        // YouTube
+        if (u.hostname.includes("youtube.com") || u.hostname.includes("youtu.be")) {
+            const id = u.hostname.includes("youtu.be")
+                ? u.pathname.slice(1)
+                : u.searchParams.get("v") || u.pathname.split("/").pop();
+            return id ? `https://www.youtube.com/embed/${id}` : null;
+        }
+        // Vimeo
+        if (u.hostname.includes("vimeo.com")) {
+            const id = u.pathname.split("/").pop();
+            return id ? `https://player.vimeo.com/video/${id}` : null;
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 // Dept data for wizard step 1
 const DEPARTMENTS = [
     { key: "Psicología", icon: Brain, color: "from-blue-500 to-blue-700" },
@@ -31,6 +52,7 @@ export function StudentDashboard() {
     const [activeBannerIndex, setActiveBannerIndex] = useState(0);
     const [showResources, setShowResources] = useState(false);
     const [previewImg, setPreviewImg] = useState<{ url: string; title: string } | null>(null);
+    const [videoModal, setVideoModal] = useState<{ embedUrl: string; title: string } | null>(null);
     const [showConfModal, setShowConfModal] = useState(false);
     const [selConf, setSelConf] = useState<AppEvent | null>(null);
     const resourcesRef = useRef<HTMLDivElement>(null);
@@ -126,7 +148,7 @@ export function StudentDashboard() {
                                         </div>
                                         <div className="flex items-center justify-center gap-2 text-white/70 text-xs font-black uppercase italic tracking-[0.3em] pt-4 border-t border-white/10 w-fit mx-auto">
                                             <Clock className="w-4 h-4" />
-                                            {new Date(ev.date).toLocaleDateString("es-MX", { day: "numeric", month: "long" })}
+                                            {new Date(ev.date + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long" })}
                                         </div>
                                     </div>
                                 </div>
@@ -181,29 +203,56 @@ export function StudentDashboard() {
                                     <p className="text-slate-500 font-medium">No tienes citas próximas</p>
                                     <p className="text-slate-400 text-sm mt-1">Solicita una cita usando el botón de arriba</p>
                                 </div>
-                            ) : proximas.map(appt => (
-                                <div key={appt.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col sm:flex-row sm:items-center gap-4 hover:shadow-md transition-shadow">
+                            ) : proximas.map(appt => {
+                                const apptDate = new Date(appt.date + "T12:00:00");
+                                const today = new Date(); today.setHours(0, 0, 0, 0);
+                                const isPast = apptDate < today;
+                                return (
+                                <div key={appt.id} className={`bg-white rounded-2xl border shadow-sm p-5 flex flex-col sm:flex-row sm:items-center gap-4 hover:shadow-md transition-shadow ${isPast ? "border-rose-100 bg-rose-50/30" : "border-slate-200"}`}>
                                     <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-1">
+                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                                             <p className="font-bold text-slate-900">{appt.department}</p>
-                                            <StatusBadge status={appt.status} />
+                                            {isPast ? (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[0.65rem] font-bold border border-rose-200">
+                                                    Sin atender
+                                                </span>
+                                            ) : (
+                                                <StatusBadge status={appt.status} />
+                                            )}
                                         </div>
                                         <p className="text-slate-500 text-sm">{appt.specialistName}</p>
                                         <p className="text-slate-400 text-xs mt-1">
-                                            {new Date(appt.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" })} — {appt.time}
+                                            {apptDate.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" })} — {appt.time}
                                         </p>
                                         {appt.motivo && <p className="text-slate-400 text-xs mt-0.5">Motivo: {appt.motivo}</p>}
+                                        {isPast && (
+                                            <p className="text-rose-500 text-xs mt-1 font-medium">El especialista debe registrar el resultado de esta sesión.</p>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-2 flex-wrap">
-                                        <Btn size="sm" variant="ghost" onClick={() => resch.open(appt.id)}>
-                                            <RefreshCw className="w-3.5 h-3.5" /> Reagendar
-                                        </Btn>
-                                        <Btn size="sm" variant="rose" onClick={() => cancel.open(appt.id)}>
-                                            Cancelar
-                                        </Btn>
+                                        {!isPast && (
+                                            <>
+                                                {!isPast && (
+                                                    <Btn size="sm" variant="ghost" onClick={() => resch.open(appt.id)}>
+                                                        <RefreshCw className="w-3.5 h-3.5" /> Reagendar
+                                                    </Btn>
+                                                )}
+                                                {appt.status === "Pendiente" && (
+                                                    <Btn size="sm" variant="rose" onClick={() => cancel.open(appt.id)}>
+                                                        Cancelar
+                                                    </Btn>
+                                                )}
+                                                {appt.status === "Confirmada" && (
+                                                    <span className="text-xs text-slate-400 font-medium px-2 py-1 bg-slate-50 rounded-lg border border-slate-200">
+                                                        Confirmada — contacta al especialista
+                                                    </span>
+                                                )}
+                                            </>
+                                        )}
                                     </div>
                                 </div>
-                            ))
+                                );
+                            })
                         )}
 
                         {activeApptTab === "historial" && (
@@ -211,12 +260,21 @@ export function StudentDashboard() {
                                 <div className="bg-white rounded-3xl border border-dashed border-slate-200 p-12 text-center">
                                     <p className="text-slate-500 font-medium">Sin historial de citas</p>
                                 </div>
-                            ) : historial.map(appt => (
+                            ) : historial.map(appt => {
+                                const isLate = appt.status === "Completada" &&
+                                    appt.updatedAt &&
+                                    appt.updatedAt.split("T")[0] > appt.date;
+                                return (
                                 <div key={appt.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex items-center gap-4 opacity-80">
                                     <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-1">
+                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                                             <p className="font-bold text-slate-900">{appt.department}</p>
                                             <StatusBadge status={appt.status} />
+                                            {isLate && (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[0.65rem] font-bold border border-amber-200">
+                                                    Sesión tardía
+                                                </span>
+                                            )}
                                         </div>
                                         <p className="text-slate-500 text-sm">{appt.specialistName}</p>
                                         <p className="text-slate-400 text-xs mt-1">
@@ -224,7 +282,8 @@ export function StudentDashboard() {
                                         </p>
                                     </div>
                                 </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
                 </div>
@@ -514,9 +573,15 @@ export function StudentDashboard() {
                                                 className="w-full text-blue-600 border-blue-100 hover:bg-blue-50"
                                                 onClick={() => {
                                                     if (item.type === "image") {
-                                                        // imageUrl = uploaded file (new), fileUrl = legacy fallback
                                                         const src = item.imageUrl || item.fileUrl;
                                                         setPreviewImg({ url: src || "", title: item.title });
+                                                    } else if (item.type === "video") {
+                                                        const embedUrl = getVideoEmbedUrl(item.url);
+                                                        if (embedUrl) {
+                                                            setVideoModal({ embedUrl, title: item.title });
+                                                        } else {
+                                                            window.open(item.url, "_blank");
+                                                        }
                                                     } else {
                                                         const link = item.fileUrl || item.url;
                                                         if (link && link !== "#") {
@@ -528,7 +593,7 @@ export function StudentDashboard() {
                                                 }}
                                             >
                                                 <Maximize2 className="w-4 h-4" />
-                                                {item.type === "image" ? "Ver Imagen" : "Acceder al recurso"}
+                                                {item.type === "image" ? "Ver imagen" : item.type === "video" ? "Ver video" : "Abrir enlace"}
                                             </Btn>
                                         </div>
                                     </div>
@@ -564,6 +629,27 @@ export function StudentDashboard() {
                 </Modal>
 
             </div>
+
+            {/* ── Video player modal ── */}
+            <Modal
+                open={!!videoModal}
+                onClose={() => setVideoModal(null)}
+                title={videoModal?.title || "Video"}
+                maxWidth="max-w-4xl"
+            >
+                {videoModal && (
+                    <div className="aspect-video w-full rounded-2xl overflow-hidden bg-black shadow-lg">
+                        <iframe
+                            src={videoModal.embedUrl}
+                            title={videoModal.title}
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                            className="w-full h-full"
+                        />
+                    </div>
+                )}
+            </Modal>
+
         </AppShell>
     );
 }
