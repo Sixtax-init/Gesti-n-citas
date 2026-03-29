@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useStore } from "../../context/StoreContext";
 import { useAuth } from "../../context/AuthContext";
 import { localISODate } from "../../utils/date";
+import type { AvailableSlot } from "../../types";
 
 export function useAppointmentWizard() {
     const { user } = useAuth();
@@ -20,7 +21,7 @@ export function useAppointmentWizard() {
     const [selModality, setSelModality] = useState("Presencial");
     const [confidentialityAccepted, setConfidentialityAccepted] = useState(false);
     const [availDates, setAvailDates] = useState<Date[]>([]);
-    const [slotsForDate, setSlotsForDate] = useState<string[]>([]);
+    const [slotsForDate, setSlotsForDate] = useState<AvailableSlot[]>([]);
 
     const reset = () => {
         setStep(1); setSelDept(null); setSelSpecId(null); setSelDate(null);
@@ -80,7 +81,7 @@ export function useReschedule(role: "student" | "specialist") {
     const [date, setDate] = useState<Date | null>(null);
     const [slot, setSlot] = useState<string | null>(null);
     const [availDates, setAvailDates] = useState<Date[]>([]);
-    const [slots, setSlots] = useState<string[]>([]);
+    const [slots, setSlots] = useState<AvailableSlot[]>([]);
     const [selModality, setSelModality] = useState("Presencial");
 
     const appointments = getAppointments(
