@@ -157,6 +157,7 @@ export interface StoreContextType {
   clearAllNotifications: (userId: string) => void;
   deleteUser: (id: string) => Promise<void>;
   fetchAll: () => Promise<void>;
+  isOnline: boolean;
 }
 
 export interface AuthContextType {

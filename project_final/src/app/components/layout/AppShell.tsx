@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Bell, LogOut, X, Menu, Trash2, Moon, Sun, KeyRound, Eye, EyeOff, RefreshCw, ChevronDown, Camera } from "lucide-react";
+import { Bell, LogOut, X, Menu, Trash2, Moon, Sun, KeyRound, Eye, EyeOff, RefreshCw, ChevronDown, Camera, WifiOff } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
@@ -33,7 +33,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 export function AppShell({ children, sidebar }: AppShellProps) {
     const { user, logout, refreshUser } = useAuth();
-    const { notifications, markNotificationsRead, deleteNotification, clearAllNotifications } = useStore();
+    const { notifications, markNotificationsRead, deleteNotification, clearAllNotifications, isOnline } = useStore();
 
     const [showNotif, setShowNotif] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -461,6 +461,14 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                         </div>
                     </div>
                 </header>
+
+                {/* Offline banner */}
+                {!isOnline && (
+                    <div className="flex items-center justify-center gap-2 bg-amber-500 text-white text-sm font-semibold px-4 py-2">
+                        <WifiOff className="w-4 h-4 shrink-0" />
+                        Sin conexión — los datos mostrados pueden estar desactualizados
+                    </div>
+                )}
 
                 {/* Page content */}
                 <main className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-950 p-4 sm:p-6 lg:p-8">

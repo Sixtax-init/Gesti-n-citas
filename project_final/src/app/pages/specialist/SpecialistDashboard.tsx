@@ -1218,7 +1218,7 @@ export function SpecialistDashboard() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                 <label className="block text-slate-700 font-bold text-sm mb-3">Nueva Fecha</label>
-                                <MiniCalendar selectedDate={resch.date} onSelect={resch.setDate} availableDates={resch.availDates} />
+                                <MiniCalendar selectedDate={resch.date} onSelect={resch.setDate} availableDates={resch.availDates} onMonthChange={resch.handleMonthChange} />
                             </div>
                             <div>
                                 <label className="block text-slate-700 font-bold text-sm mb-3">Horarios</label>

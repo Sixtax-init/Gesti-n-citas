@@ -218,6 +218,7 @@ interface MiniCalendarProps {
     onSelect: (d: Date) => void;
     availableDates?: Date[] | null;
     highlightedDates?: Date[] | null;
+    onMonthChange?: (year: number, month: number) => void;
 }
 
 const isSameDay = (a: Date | null, b: Date | null) =>
@@ -226,7 +227,7 @@ const isSameDay = (a: Date | null, b: Date | null) =>
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate();
 
-export function MiniCalendar({ selectedDate, onSelect, availableDates = null, highlightedDates = null }: MiniCalendarProps) {
+export function MiniCalendar({ selectedDate, onSelect, availableDates = null, highlightedDates = null, onMonthChange }: MiniCalendarProps) {
     const [viewDate, setViewDate] = useState(selectedDate || new Date());
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
@@ -244,13 +245,21 @@ export function MiniCalendar({ selectedDate, onSelect, availableDates = null, hi
     return (
         <div className="select-none bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
             <div className="flex items-center justify-between mb-4">
-                <button onClick={() => setViewDate(new Date(year, month - 1, 1))} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer">
+                <button onClick={() => {
+                    const d = new Date(year, month - 1, 1);
+                    setViewDate(d);
+                    onMonthChange?.(d.getFullYear(), d.getMonth());
+                }} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer">
                     <ChevronLeft className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                 </button>
                 <span className="text-slate-900 dark:text-white font-medium text-sm capitalize">
                     {new Date(year, month).toLocaleDateString("es-MX", { month: "long", year: "numeric" })}
                 </span>
-                <button onClick={() => setViewDate(new Date(year, month + 1, 1))} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer">
+                <button onClick={() => {
+                    const d = new Date(year, month + 1, 1);
+                    setViewDate(d);
+                    onMonthChange?.(d.getFullYear(), d.getMonth());
+                }} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer">
                     <ChevronRight className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                 </button>
             </div>

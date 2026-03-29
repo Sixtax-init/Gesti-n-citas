@@ -209,8 +209,8 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
 
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    // Fix: Sunday (0) should go back 6 days to last Monday, not forward 1
-    const dayShift = now.getDay() === 0 ? -6 : 1 - now.getDay();
+    // Sunday (0): Monday is tomorrow (+1), matching specialist dashboard behaviour
+    const dayShift = now.getDay() === 0 ? 1 : 1 - now.getDay();
     const mondayOfCurrentWeek = new Date(now);
     mondayOfCurrentWeek.setDate(now.getDate() + dayShift);
 

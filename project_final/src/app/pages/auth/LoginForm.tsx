@@ -95,7 +95,8 @@ export function LoginForm({ onSwitchToRegister }: { onSwitchToRegister: () => vo
 
     const demoLogin = async (em: string, pw: string) => {
         setEmail(em); setPassword(pw); setLoading(true);
-        await login(em, pw);
+        const result = await login(em, pw);
+        if (!result.ok) toast.error(result.error ?? 'Cuenta demo no disponible. Verifica que la BD tenga datos de prueba.');
         setLoading(false);
     };
 

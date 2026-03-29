@@ -435,7 +435,7 @@ export function StudentDashboard() {
                             {wizard.selSpecId && (
                                 <div>
                                     <p className="font-bold text-slate-700 text-sm mb-2">Selecciona una fecha disponible</p>
-                                    <MiniCalendar selectedDate={wizard.selDate} onSelect={wizard.setSelDate} availableDates={wizard.availDates} />
+                                    <MiniCalendar selectedDate={wizard.selDate} onSelect={wizard.setSelDate} availableDates={wizard.availDates} onMonthChange={wizard.handleMonthChange} />
                                 </div>
                             )}
 
@@ -563,7 +563,7 @@ export function StudentDashboard() {
                 {/* ── Reschedule Modal ── */}
                 <Modal open={resch.show} onClose={() => resch.setShow(false)} title="Reagendar Cita" maxWidth="max-w-lg">
                     <div className="space-y-5">
-                        <MiniCalendar selectedDate={resch.date} onSelect={resch.setDate} availableDates={resch.availDates} />
+                        <MiniCalendar selectedDate={resch.date} onSelect={resch.setDate} availableDates={resch.availDates} onMonthChange={resch.handleMonthChange} />
                         {resch.date && (
                             resch.slots.length > 0 ? (
                                 <div className="grid grid-cols-3 gap-2">
