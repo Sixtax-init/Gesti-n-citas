@@ -236,23 +236,9 @@ jobs:
             label="Backend (server)"; [ "$proj" == "frontend" ] && label="Frontend (project_final)"
             echo "  $label:" >> $REPORT
             if [ "${proj}" == "server" ] && [ "$AUDIT_SERVER_FAILED" == "true" ]; then
-              python3 -c "
-import json
-d = json.load(open('npm-audit-server.json'))
-v = d.get('metadata', {}).get('vulnerabilities', {})
-print(f'    ESTADO  : VULNERABILIDADES ENCONTRADAS')
-print(f'    Criticas: {v.get(\"critical\", 0)}')
-print(f'    Altas   : {v.get(\"high\", 0)}')
-" 2>/dev/null >> $REPORT || echo "    ESTADO  : No se pudo parsear el reporte" >> $REPORT
+              python3 -c "import json; d=json.load(open('npm-audit-server.json')); v=d.get('metadata',{}).get('vulnerabilities',{}); print('    ESTADO  : VULNERABILIDADES ENCONTRADAS'); print('    Criticas: ' + str(v.get('critical',0))); print('    Altas   : ' + str(v.get('high',0)))" 2>/dev/null >> $REPORT || echo "    ESTADO  : No se pudo parsear el reporte" >> $REPORT
             elif [ "${proj}" == "frontend" ] && [ "$AUDIT_FRONTEND_FAILED" == "true" ]; then
-              python3 -c "
-import json
-d = json.load(open('npm-audit-frontend.json'))
-v = d.get('metadata', {}).get('vulnerabilities', {})
-print(f'    ESTADO  : VULNERABILIDADES ENCONTRADAS')
-print(f'    Criticas: {v.get(\"critical\", 0)}')
-print(f'    Altas   : {v.get(\"high\", 0)}')
-" 2>/dev/null >> $REPORT || echo "    ESTADO  : No se pudo parsear el reporte" >> $REPORT
+              python3 -c "import json; d=json.load(open('npm-audit-frontend.json')); v=d.get('metadata',{}).get('vulnerabilities',{}); print('    ESTADO  : VULNERABILIDADES ENCONTRADAS'); print('    Criticas: ' + str(v.get('critical',0))); print('    Altas   : ' + str(v.get('high',0)))" 2>/dev/null >> $REPORT || echo "    ESTADO  : No se pudo parsear el reporte" >> $REPORT
             else
               echo "    ESTADO  : Sin vulnerabilidades altas o criticas" >> $REPORT
             fi
@@ -265,21 +251,7 @@ print(f'    Altas   : {v.get(\"high\", 0)}')
             report="eslint-${proj}-report.json"
             echo "  $label:" >> $REPORT
             if [ -f "$report" ]; then
-              python3 -c "
-import json
-d = json.load(open('$report'))
-errors   = sum(f['errorCount'] for f in d)
-warnings = sum(f['warningCount'] for f in d)
-files_with_errors = [f['filePath'] for f in d if f['errorCount'] > 0]
-print(f'    Errores : {errors}')
-print(f'    Avisos  : {warnings}')
-if files_with_errors:
-    print('    Archivos con errores:')
-    for fp in files_with_errors[:10]:
-        print(f'      - {fp}')
-    if len(files_with_errors) > 10:
-        print(f'      ... y {len(files_with_errors) - 10} mas')
-" 2>/dev/null >> $REPORT || echo "    No se pudo parsear el reporte" >> $REPORT
+              python3 -c "import json; d=json.load(open('$report')); errs=sum(f['errorCount'] for f in d); warns=sum(f['warningCount'] for f in d); bad=[f['filePath'] for f in d if f['errorCount']>0]; print('    Errores : '+str(errs)); print('    Avisos  : '+str(warns)); [print('    - '+fp) for fp in bad[:10]]; bad[10:] and print('    ... y '+str(len(bad)-10)+' mas')" 2>/dev/null >> $REPORT || echo "    No se pudo parsear el reporte" >> $REPORT
             else
               echo "    ESTADO  : Reporte no generado" >> $REPORT
             fi
