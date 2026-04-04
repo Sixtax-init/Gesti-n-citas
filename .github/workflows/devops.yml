@@ -27,7 +27,7 @@ jobs:
     name: Pipeline de Calidad y Seguridad
     runs-on: ubuntu-latest
     permissions:
-      actions: read
+      actions: write
       contents: read
       security-events: write
 
@@ -126,21 +126,6 @@ jobs:
           category: "/language:javascript-typescript"
 
       # ─── RESUMEN ───────────────────────────────────────────────────────────
-
-      - name: Subir Reporte como Artefacto
-        if: always()
-        # actions/upload-artifact@v4
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: reporte-pipeline-${{ github.run_number }}
-          path: |
-            reporte-pipeline.txt
-            eslint-server-report.json
-            eslint-frontend-report.json
-            npm-audit-server.json
-            npm-audit-frontend.json
-          if-no-files-found: ignore
-          retention-days: 30
 
       - name: Generar Resumen Ejecutivo Final
         if: always()
@@ -322,3 +307,18 @@ if files_with_errors:
           if [ "$BUILD_SERVER_FAILED" == "true" ] || [ "$BUILD_FRONTEND_FAILED" == "true" ] || [ "$AUDIT_SERVER_FAILED" == "true" ] || [ "$AUDIT_FRONTEND_FAILED" == "true" ] || [ "$LINT_SERVER_FAILED" == "true" ] || [ "$LINT_FRONTEND_FAILED" == "true" ]; then
             exit 1
           fi
+
+      - name: Subir Reporte como Artefacto
+        if: always()
+        # actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: reporte-pipeline-${{ github.run_number }}
+          path: |
+            reporte-pipeline.txt
+            eslint-server-report.json
+            eslint-frontend-report.json
+            npm-audit-server.json
+            npm-audit-frontend.json
+          if-no-files-found: ignore
+          retention-days: 30
