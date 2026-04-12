@@ -145,11 +145,14 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
             type: "cancelled",
           });
         } else {
-          addNotification(appt.specialistId, {
-            title: "Cita Cancelada por Alumno",
-            message: `${appt.studentName} canceló la cita del ${new Date(appt.date + "T12:00:00").toLocaleDateString()} a las ${appt.time}. Motivo: ${notes ?? "Sin especificar"}`,
-            type: "cancelled",
-          });
+          const specUserId = specialists.find(s => s.id === appt.specialistId)?.userId;
+          if (specUserId) {
+            addNotification(specUserId, {
+              title: "Cita Cancelada por Alumno",
+              message: `${appt.studentName} canceló la cita del ${new Date(appt.date + "T12:00:00").toLocaleDateString()} a las ${appt.time}. Motivo: ${notes ?? "Sin especificar"}`,
+              type: "cancelled",
+            });
+          }
         }
       }
     }).catch(err => {

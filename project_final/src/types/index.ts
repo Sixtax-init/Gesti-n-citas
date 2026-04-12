@@ -56,8 +56,20 @@ export interface Appointment {
   notes?: string;
   isFollowUp?: boolean;
   parentId?: string | null;
+  periodId?: string | null;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface ReportPeriod {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string | null;
+  status: "activo" | "cerrado";
+  closedAt: string | null;
+  createdAt: string;
+  _count?: { appointments: number };
 }
 
 export interface AppEvent {
@@ -150,6 +162,7 @@ export interface StoreContextType {
       carrera: any[];
     }
   };
+  activePeriod: ReportPeriod | null;
   notifications: Record<string, AppNotification[]>;
   addNotification: (userId: string, notif: Omit<AppNotification, "id" | "time" | "read">) => void;
   markNotificationsRead: (userId: string) => void;

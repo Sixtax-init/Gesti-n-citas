@@ -1,25 +1,41 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import {
     CalendarCheck, Clock, CheckCircle2, Users, TrendingUp,
     BarChart3, Plus, Pencil, XCircle, Search, Download,
     Clock3, FileText, Megaphone, Brain, GraduationCap, Apple,
     Video, ExternalLink, Image as ImageIcon, CalendarDays, Trash2,
+    Scissors, ChevronDown,
 } from "lucide-react";
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell,
 } from "recharts";
+import type { DateRange } from "react-day-picker";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useStore } from "../../../context/StoreContext";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, Avatar, StatusBadge, Modal, inputCls, EmptyState } from "../../components/ui";
+import { Calendar } from "../../components/ui/calendar";
 import { DEPT_CONFIG } from "../../../constants";
 import { PIE_COLORS } from "../../../data/mockData";
 import { useActionModal } from "../../hooks";
 import { useTheme } from "../../hooks/useTheme";
+import { API, authHeaders } from "../../../lib/api";
 import type { Appointment, Specialist, AppEvent, Resource } from "../../../types";
+
+// ─── ReportPeriod type ────────────────────────────────────────────────────────
+interface ReportPeriod {
+    id: string;
+    name: string;
+    startDate: string;
+    endDate: string | null;
+    status: "activo" | "cerrado";
+    closedAt: string | null;
+    createdAt: string;
+    _count?: { appointments: number };
+}
 
 // ─── Download chart as styled card image ─────────────────────────────────────
 interface LegendItem { label: string; color: string; percent?: number; }
@@ -384,7 +400,7 @@ export function AdminDashboard() {
     const cursorStyle = dark ? { fill: "rgba(255,255,255,0.04)" } : { fill: "#f8fafc" };
 
     const {
-        getAppointments, getStats,
+        getAppointments, getStats, activePeriod: storeActivePeriod,
         specialists, addSpecialist, updateSpecialist, removeSpecialist,
         events, addEvent, updateEvent, deleteEvent, resources, addResource, updateResource, deleteResource, users, deleteUser,
     } = useStore();
@@ -394,6 +410,151 @@ export function AdminDashboard() {
     const [statusFilter, setStatusFilter] = useState("Todos");
     const [searchTerm, setSearchTerm] = useState("");
     const [statsView, setStatsView] = useState("Global");
+
+    // Paginación
+    const APPT_PAGE_SIZE = 15;
+    const STUDENTS_PAGE_SIZE = 20;
+    const [apptPage, setApptPage] = useState(0);
+    const [studentsPage, setStudentsPage] = useState(0);
+
+    // Filtro de período para la tabla de citas (default: período activo si existe)
+    const [apptPeriodFilter, setApptPeriodFilter] = useState<string>("active");
+
+    // ── Períodos ──────────────────────────────────────────────────────────────
+    const [periods, setPeriods] = useState<ReportPeriod[]>([]);
+    const [selectedPeriodId, setSelectedPeriodId] = useState<string>("all");
+    const [periodStats, setPeriodStats] = useState<any>(null);
+    const [loadingPeriodStats, setLoadingPeriodStats] = useState(false);
+
+    // Modal de crear/editar período
+    const [showPeriodModal, setShowPeriodModal] = useState(false);
+    const [periodModalMode, setPeriodModalMode] = useState<"create" | "edit" | "close">("create");
+    const [editingPeriod, setEditingPeriod] = useState<ReportPeriod | null>(null);
+    const [periodName, setPeriodName] = useState("");
+    const [periodDateRange, setPeriodDateRange] = useState<DateRange | undefined>(undefined);
+    // Campos del siguiente período (modal de corte)
+    const [nextPeriodName, setNextPeriodName] = useState("");
+    const [nextPeriodDateRange, setNextPeriodDateRange] = useState<DateRange | undefined>(undefined);
+    const [createNextPeriod, setCreateNextPeriod] = useState(true);
+
+    const fetchPeriods = useCallback(async () => {
+        try {
+            const res = await fetch(`${API}/periods`, { headers: authHeaders() });
+            if (res.ok) setPeriods(await res.json());
+        } catch { /* silencioso */ }
+    }, []);
+
+    const fetchPeriodStats = useCallback(async (periodId: string) => {
+        setLoadingPeriodStats(true);
+        try {
+            const url = periodId === "all" ? `${API}/stats` : `${API}/stats?periodId=${periodId}`;
+            const res = await fetch(url, { headers: authHeaders() });
+            if (res.ok) setPeriodStats(await res.json());
+        } catch { /* silencioso */ } finally {
+            setLoadingPeriodStats(false);
+        }
+    }, []);
+
+    useEffect(() => { fetchPeriods(); }, [fetchPeriods]);
+
+    useEffect(() => {
+        if (selectedPeriodId !== "all") {
+            fetchPeriodStats(selectedPeriodId);
+        } else {
+            setPeriodStats(null);
+        }
+    }, [selectedPeriodId, fetchPeriodStats]);
+
+    const openCreatePeriod = () => {
+        setPeriodModalMode("create");
+        setEditingPeriod(null);
+        setPeriodName("");
+        setPeriodDateRange(undefined);
+        setShowPeriodModal(true);
+    };
+
+    const openEditPeriod = (p: ReportPeriod) => {
+        setPeriodModalMode("edit");
+        setEditingPeriod(p);
+        setPeriodName(p.name);
+        setPeriodDateRange(p.startDate ? {
+            from: new Date(p.startDate + "T12:00:00"),
+            to: p.endDate ? new Date(p.endDate + "T12:00:00") : undefined,
+        } : undefined);
+        setShowPeriodModal(true);
+    };
+
+    const openClosePeriod = (p: ReportPeriod) => {
+        setPeriodModalMode("close");
+        setEditingPeriod(p);
+        setNextPeriodName("");
+        setNextPeriodDateRange(undefined);
+        setCreateNextPeriod(true);
+        setShowPeriodModal(true);
+    };
+
+    const handleSavePeriod = async () => {
+        if (!periodName.trim()) { toast.error("El nombre del período es obligatorio"); return; }
+        if (!periodDateRange?.from) { toast.error("Selecciona al menos la fecha de inicio"); return; }
+        const toISO = (d: Date) => d.toISOString().split("T")[0];
+        try {
+            if (periodModalMode === "create") {
+                const res = await fetch(`${API}/periods`, {
+                    method: "POST",
+                    headers: authHeaders(),
+                    body: JSON.stringify({
+                        name: periodName,
+                        startDate: toISO(periodDateRange.from),
+                        endDate: periodDateRange.to ? toISO(periodDateRange.to) : null,
+                    }),
+                });
+                if (!res.ok) { const e = await res.json(); toast.error(e.error); return; }
+                toast.success("Período creado");
+            } else if (periodModalMode === "edit" && editingPeriod) {
+                const res = await fetch(`${API}/periods/${editingPeriod.id}`, {
+                    method: "PATCH",
+                    headers: authHeaders(),
+                    body: JSON.stringify({
+                        name: periodName,
+                        startDate: toISO(periodDateRange.from),
+                        endDate: periodDateRange.to ? toISO(periodDateRange.to) : null,
+                    }),
+                });
+                if (!res.ok) { const e = await res.json(); toast.error(e.error); return; }
+                toast.success("Período actualizado");
+            }
+            setShowPeriodModal(false);
+            fetchPeriods();
+        } catch { toast.error("Error al guardar el período"); }
+    };
+
+    const handleClosePeriod = async () => {
+        if (!editingPeriod) return;
+        if (createNextPeriod) {
+            if (!nextPeriodName.trim()) { toast.error("El nombre del nuevo período es obligatorio"); return; }
+            if (!nextPeriodDateRange?.from) { toast.error("Selecciona la fecha de inicio del nuevo período"); return; }
+        }
+        const toISO = (d: Date) => d.toISOString().split("T")[0];
+        try {
+            const body: any = {};
+            if (createNextPeriod && nextPeriodDateRange?.from) {
+                body.nextPeriod = {
+                    name: nextPeriodName,
+                    startDate: toISO(nextPeriodDateRange.from),
+                    endDate: nextPeriodDateRange.to ? toISO(nextPeriodDateRange.to) : null,
+                };
+            }
+            const res = await fetch(`${API}/periods/${editingPeriod.id}/close`, {
+                method: "POST",
+                headers: authHeaders(),
+                body: JSON.stringify(body),
+            });
+            if (!res.ok) { const e = await res.json(); toast.error(e.error); return; }
+            toast.success("Corte realizado exitosamente");
+            setShowPeriodModal(false);
+            fetchPeriods();
+        } catch { toast.error("Error al realizar el corte"); }
+    };
 
     const action = useActionModal();
 
@@ -502,11 +663,12 @@ export function AdminDashboard() {
         "Nutrición": chartNutricion,
     };
 
-    // Data
-    const fullStats = getStats();
+    // Data — usa periodStats si hay un período seleccionado, si no los stats globales
+    const fullStats = periodStats ?? getStats();
     const summary = fullStats.summary;
     const charts = fullStats.charts;
     const allAppts = getAppointments();
+    const activePeriod = periods.find(p => p.status === "activo") ?? null;
 
     const todayMidnightAdmin = new Date(); todayMidnightAdmin.setHours(0, 0, 0, 0);
     const sinCerrarCount = allAppts.filter(a =>
@@ -579,7 +741,16 @@ export function AdminDashboard() {
         };
     }, [allAppts, users]);
 
-    const filteredAppts = allAppts.filter(a => {
+    const filteredAppts = useMemo(() => allAppts.filter(a => {
+        // Filtro por período
+        if (apptPeriodFilter === "active") {
+            if (storeActivePeriod) {
+                if (a.periodId !== storeActivePeriod.id) return false;
+            }
+            // Si no hay período activo, se muestran todas (no filtra)
+        } else if (apptPeriodFilter !== "all") {
+            if (a.periodId !== apptPeriodFilter) return false;
+        }
         if (deptFilter !== "Todos" && a.department !== deptFilter) return false;
         if (statusFilter === "Sin cerrar") {
             const apptD = new Date(a.date + "T12:00:00");
@@ -590,7 +761,16 @@ export function AdminDashboard() {
             if (!a.studentName.toLowerCase().includes(q) && !a.specialistName.toLowerCase().includes(q)) return false;
         }
         return true;
-    });
+    }), [allAppts, apptPeriodFilter, storeActivePeriod, deptFilter, statusFilter, searchTerm, todayMidnightAdmin]);
+
+    // Reset de página cuando cambian los filtros
+    useEffect(() => { setApptPage(0); }, [apptPeriodFilter, deptFilter, statusFilter, searchTerm]);
+
+    const apptTotalPages = Math.ceil(filteredAppts.length / APPT_PAGE_SIZE);
+    const pagedAppts = filteredAppts.slice(apptPage * APPT_PAGE_SIZE, (apptPage + 1) * APPT_PAGE_SIZE);
+
+    const studentsTotalPages = Math.ceil(users.length / STUDENTS_PAGE_SIZE);
+    const pagedStudents = users.slice(studentsPage * STUDENTS_PAGE_SIZE, (studentsPage + 1) * STUDENTS_PAGE_SIZE);
 
     const handleAddSpec = async () => {
         if (!newName || !newEmail || !newPass) { toast.error("Nombre, correo y contraseña son obligatorios"); return; }
@@ -694,26 +874,35 @@ export function AdminDashboard() {
                     {/* ─── Citas Tab ─── */}
                     {activeTab === "citas" && (
                         <div className="flex flex-col h-full">
-                            <div className="p-6 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-700/30 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-                                <div>
-                                    <h3 className="text-xl font-bold text-slate-900">Registro Global de Citas</h3>
-                                    <p className="text-slate-500 font-medium text-sm mt-1">Busca y filtra citas de todos los departamentos</p>
-                                </div>
-                                <div className="flex flex-col sm:flex-row items-center gap-3">
-                                    <div className="relative w-full sm:w-64">
+                            <div className="p-6 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-700/30 flex flex-col gap-3">
+                                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                                    <div>
+                                        <h3 className="text-xl font-bold text-slate-900 dark:text-white">Registro Global de Citas</h3>
+                                        <p className="text-slate-500 font-medium text-sm mt-0.5">
+                                            {filteredAppts.length} cita{filteredAppts.length !== 1 ? "s" : ""} · {storeActivePeriod ? `Período: ${storeActivePeriod.name}` : "Sin período activo"}
+                                        </p>
+                                    </div>
+                                    <div className="relative w-full md:w-64">
                                         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                                         <input type="text" placeholder="Buscar alumno o especialista..." value={searchTerm}
                                             onChange={e => setSearchTerm(e.target.value)}
                                             className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-700 dark:text-white dark:border-slate-600 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600" />
                                     </div>
-                                    <div className="flex gap-2">
-                                        <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
-                                            <option>Todos</option><option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
-                                        </select>
-                                        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
-                                            <option>Todos</option><option>Pendiente</option><option>Confirmada</option><option>Completada</option><option>Cancelada</option><option>Sin cerrar</option>
-                                        </select>
-                                    </div>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    <select value={apptPeriodFilter} onChange={e => setApptPeriodFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
+                                        <option value="active">{storeActivePeriod ? `${storeActivePeriod.name} (activo)` : "Período actual"}</option>
+                                        <option value="all">Todos los períodos</option>
+                                        {periods.filter(p => p.status === "cerrado").map(p => (
+                                            <option key={p.id} value={p.id}>{p.name}</option>
+                                        ))}
+                                    </select>
+                                    <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
+                                        <option>Todos</option><option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
+                                    </select>
+                                    <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
+                                        <option>Todos</option><option>Pendiente</option><option>Confirmada</option><option>Completada</option><option>Cancelada</option><option>Sin cerrar</option>
+                                    </select>
                                 </div>
                             </div>
 
@@ -727,7 +916,7 @@ export function AdminDashboard() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700 bg-white dark:bg-slate-900">
-                                        {filteredAppts.map(cita => {
+                                        {pagedAppts.map(cita => {
                                             const citaDate = new Date(cita.date + "T12:00:00");
                                             const isSinCerrar = (cita.status === "Pendiente" || cita.status === "Confirmada") && citaDate < todayMidnightAdmin;
                                             const isSesionTardia = cita.status === "Completada" && cita.updatedAt && cita.updatedAt.split("T")[0] > cita.date;
@@ -757,6 +946,29 @@ export function AdminDashboard() {
                                     <EmptyState icon={CalendarCheck} title="Sin resultados" subtitle="No hay citas que coincidan con los filtros seleccionados." />
                                 )}
                             </div>
+                            {apptTotalPages > 1 && (
+                                <div className="px-6 py-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 flex items-center justify-between">
+                                    <span className="text-xs text-slate-500 font-medium">
+                                        {apptPage * APPT_PAGE_SIZE + 1}–{Math.min((apptPage + 1) * APPT_PAGE_SIZE, filteredAppts.length)} de {filteredAppts.length}
+                                    </span>
+                                    <div className="flex items-center gap-1">
+                                        <button onClick={() => setApptPage(p => Math.max(0, p - 1))} disabled={apptPage === 0}
+                                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                            ← Anterior
+                                        </button>
+                                        {Array.from({ length: apptTotalPages }, (_, i) => (
+                                            <button key={i} onClick={() => setApptPage(i)}
+                                                className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${i === apptPage ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"}`}>
+                                                {i + 1}
+                                            </button>
+                                        ))}
+                                        <button onClick={() => setApptPage(p => Math.min(apptTotalPages - 1, p + 1))} disabled={apptPage === apptTotalPages - 1}
+                                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                            Siguiente →
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -853,9 +1065,15 @@ export function AdminDashboard() {
                     )}
 
                     {/* ─── Estudiantes Tab ─── */}
-                    {activeTab === "estudiantes" && (
+                    {activeTab === "estudiantes" && (() => {
+                        const alumnosAll = users.filter((u: any) => u.role === "alumno");
+                        const alumnosTotalPages = Math.ceil(alumnosAll.length / STUDENTS_PAGE_SIZE);
+                        const pagedAlumnos = alumnosAll.slice(studentsPage * STUDENTS_PAGE_SIZE, (studentsPage + 1) * STUDENTS_PAGE_SIZE);
+                        return (
                         <div className="p-8">
-                            <h3 className="text-2xl font-bold text-slate-900 mb-6">Alumnos Registrados</h3>
+                            <div className="flex items-center justify-between mb-6">
+                                <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Alumnos Registrados <span className="text-slate-400 font-normal text-lg">({alumnosAll.length})</span></h3>
+                            </div>
                             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden overflow-x-auto">
                                 <table className="w-full min-w-[640px]">
                                     <thead>
@@ -866,17 +1084,17 @@ export function AdminDashboard() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-50 dark:divide-slate-700">
-                                        {users.filter((u: any) => u.role === "alumno").map((u: any) => (
+                                        {pagedAlumnos.map((u: any) => (
                                             <tr key={u.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/40 transition-colors">
                                                 <td className="px-6 py-4">
                                                     <div className="flex items-center gap-3">
                                                         <Avatar name={u.name} size="sm" />
-                                                        <p className="font-bold text-slate-900 text-sm">{u.name}</p>
+                                                        <p className="font-bold text-slate-900 dark:text-white text-sm">{u.name}</p>
                                                     </div>
                                                 </td>
-                                                <td className="px-6 py-4 text-slate-700 text-sm">{u.carrera || "—"}</td>
-                                                <td className="px-6 py-4 text-slate-700 text-sm">{u.semestre || "—"}</td>
-                                                <td className="px-6 py-4 text-slate-700 text-sm font-mono">{u.matricula || "—"}</td>
+                                                <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">{u.carrera || "—"}</td>
+                                                <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">{u.semestre || "—"}</td>
+                                                <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm font-mono">{u.matricula || "—"}</td>
                                                 <td className="px-6 py-4 text-slate-500 text-sm">{u.email}</td>
                                                 <td className="px-6 py-4">
                                                     <button onClick={() => { if (confirm(`¿Eliminar a ${u.name}?`)) { deleteUser(u.id); toast.success("Alumno eliminado"); } }}
@@ -888,9 +1106,33 @@ export function AdminDashboard() {
                                         ))}
                                     </tbody>
                                 </table>
+                                {alumnosTotalPages > 1 && (
+                                    <div className="px-6 py-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 flex items-center justify-between">
+                                        <span className="text-xs text-slate-500 font-medium">
+                                            {studentsPage * STUDENTS_PAGE_SIZE + 1}–{Math.min((studentsPage + 1) * STUDENTS_PAGE_SIZE, alumnosAll.length)} de {alumnosAll.length}
+                                        </span>
+                                        <div className="flex items-center gap-1">
+                                            <button onClick={() => setStudentsPage(p => Math.max(0, p - 1))} disabled={studentsPage === 0}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                                ← Anterior
+                                            </button>
+                                            {Array.from({ length: alumnosTotalPages }, (_, i) => (
+                                                <button key={i} onClick={() => setStudentsPage(i)}
+                                                    className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${i === studentsPage ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"}`}>
+                                                    {i + 1}
+                                                </button>
+                                            ))}
+                                            <button onClick={() => setStudentsPage(p => Math.min(alumnosTotalPages - 1, p + 1))} disabled={studentsPage === alumnosTotalPages - 1}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                                Siguiente →
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
-                    )}
+                        );
+                    })()}
 
                     {/* ─── Estadísticas Tab ─── */}
                     {activeTab === "estadisticas" && (
@@ -900,15 +1142,37 @@ export function AdminDashboard() {
                                     <h3 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Análisis de Datos e Impacto</h3>
                                     <p className="text-slate-500 font-medium">Visualiza y exporta las métricas de atención institucional</p>
                                 </div>
-                                <div className="flex bg-white dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700 shadow-sm">
-                                    {["Global", "Psicología", "Tutorías", "Nutrición"].map(v => (
-                                        <button key={v} onClick={() => setStatsView(v)}
-                                            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer ${statsView === v ? "bg-blue-600 text-white shadow-md shadow-blue-600/20" : "text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700"}`}>
-                                            {v}
-                                        </button>
-                                    ))}
+                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                                    {/* Selector de período */}
+                                    <div className="relative">
+                                        <select
+                                            value={selectedPeriodId}
+                                            onChange={e => setSelectedPeriodId(e.target.value)}
+                                            className={`${inputCls} pr-8 text-sm font-semibold appearance-none cursor-pointer min-w-[220px]`}
+                                        >
+                                            <option value="all">Todos los períodos</option>
+                                            {periods.map(p => (
+                                                <option key={p.id} value={p.id}>
+                                                    {p.name}{p.status === "activo" ? " (activo)" : ""}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                                    </div>
+                                    {/* Tabs de departamento */}
+                                    <div className="flex bg-white dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700 shadow-sm">
+                                        {["Global", "Psicología", "Tutorías", "Nutrición"].map(v => (
+                                            <button key={v} onClick={() => setStatsView(v)}
+                                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer ${statsView === v ? "bg-blue-600 text-white shadow-md shadow-blue-600/20" : "text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700"}`}>
+                                                {v}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
+                            {loadingPeriodStats && (
+                                <div className="text-center py-4 text-slate-500 text-sm font-medium animate-pulse">Cargando datos del período...</div>
+                            )}
 
                             <div className="space-y-6">
                                 {(() => {
@@ -1070,33 +1334,96 @@ export function AdminDashboard() {
 
                     {/* ─── Reportes Tab ─── */}
                     {activeTab === "reportes" && (
-                        <div className="p-8">
-                            <div className="max-w-4xl mx-auto text-center mb-12 mt-4">
-                                <div className="w-16 h-16 bg-violet-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                                    <FileText className="w-8 h-8 text-violet-600" />
+                        <div className="p-8 space-y-10">
+                            {/* ── Encabezado ── */}
+                            <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
+                                <div>
+                                    <h3 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight mb-1">Reportes y Períodos</h3>
+                                    <p className="text-slate-500 font-medium">Gestiona los períodos académicos y exporta reportes PDF por departamento.</p>
                                 </div>
-                                <h3 className="text-3xl font-bold text-slate-900 dark:text-white mb-3 tracking-tight">Generación de Reportes</h3>
-                                <p className="text-slate-500 text-lg">Exporta los datos en formato PDF segmentados por departamento o genera un reporte global.</p>
+                                <Btn onClick={openCreatePeriod} disabled={!!activePeriod} className="shrink-0" title={activePeriod ? "Ya existe un período activo" : ""}>
+                                    <Plus className="w-4 h-4 mr-2" /> Nuevo período
+                                </Btn>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                                {[
-                                    { label: "Psicología", icon: Brain, color: "blue", gradient: "from-blue-500 to-indigo-600" },
-                                    { label: "Tutorías", icon: GraduationCap, color: "emerald", gradient: "from-emerald-500 to-teal-600" },
-                                    { label: "Nutrición", icon: Apple, color: "rose", gradient: "from-rose-500 to-orange-500" },
-                                    { label: "Reporte Global", icon: FileText, color: "violet", gradient: "from-violet-600 to-purple-700" },
-                                ].map(r => (
-                                    <div key={r.label} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 text-center hover:shadow-xl transition-all flex flex-col h-full">
-                                        <div className={`w-16 h-16 bg-gradient-to-br ${r.gradient} rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg`}>
-                                            <r.icon className="w-8 h-8 text-white" />
+                            {/* ── Período activo ── */}
+                            {activePeriod ? (
+                                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-3xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                    <div>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                                            <span className="text-xs font-bold text-green-600 dark:text-green-400 uppercase tracking-wide">Período activo</span>
                                         </div>
-                                        <h4 className="text-slate-900 dark:text-white font-bold text-lg mb-2">{r.label}</h4>
-                                        <p className="text-slate-500 text-xs font-medium mb-6 flex-1">Datos consolidados, demografía y efectividad.</p>
-                                        <Btn onClick={() => generatePDFReport(r.label, allAppts, users)} variant="outline" className="w-full">
-                                            <Download className="w-4 h-4 mr-2" /> PDF Export
+                                        <p className="text-slate-900 dark:text-white font-bold text-lg">{activePeriod.name}</p>
+                                        <p className="text-slate-500 text-sm mt-0.5">
+                                            Desde {new Date(activePeriod.startDate + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}
+                                            {activePeriod.endDate && ` hasta ${new Date(activePeriod.endDate + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}`}
+                                            {" · "}{activePeriod._count?.appointments ?? 0} citas registradas
+                                        </p>
+                                    </div>
+                                    <div className="flex gap-3 shrink-0">
+                                        <Btn variant="outline" onClick={() => openEditPeriod(activePeriod)}>
+                                            <Pencil className="w-4 h-4 mr-2" /> Editar fechas
+                                        </Btn>
+                                        <Btn onClick={() => openClosePeriod(activePeriod)} className="bg-amber-500 hover:bg-amber-600 text-white border-0">
+                                            <Scissors className="w-4 h-4 mr-2" /> Realizar Corte
                                         </Btn>
                                     </div>
-                                ))}
+                                </div>
+                            ) : (
+                                <div className="bg-slate-50 dark:bg-slate-800/50 border border-dashed border-slate-300 dark:border-slate-600 rounded-3xl p-8 text-center">
+                                    <Scissors className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                                    <p className="text-slate-500 font-medium">No hay ningún período activo.</p>
+                                    <p className="text-slate-400 text-sm mt-1">Crea un período para comenzar a etiquetar las citas automáticamente.</p>
+                                </div>
+                            )}
+
+                            {/* ── Historial de períodos ── */}
+                            {periods.filter(p => p.status === "cerrado").length > 0 && (
+                                <div>
+                                    <h4 className="text-slate-900 dark:text-white font-bold text-base mb-4">Historial de períodos cerrados</h4>
+                                    <div className="space-y-3">
+                                        {periods.filter(p => p.status === "cerrado").map(p => (
+                                            <div key={p.id} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                                <div>
+                                                    <p className="text-slate-900 dark:text-white font-semibold">{p.name}</p>
+                                                    <p className="text-slate-500 text-sm">
+                                                        {p.startDate && new Date(p.startDate + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" })}
+                                                        {p.endDate && ` — ${new Date(p.endDate + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" })}`}
+                                                        {" · "}{p._count?.appointments ?? 0} citas
+                                                    </p>
+                                                </div>
+                                                <Btn variant="ghost" size="sm" onClick={() => openEditPeriod(p)}>
+                                                    <Pencil className="w-3.5 h-3.5 mr-1.5" /> Renombrar
+                                                </Btn>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* ── Exportar PDF ── */}
+                            <div>
+                                <h4 className="text-slate-900 dark:text-white font-bold text-base mb-4">Exportar reporte PDF</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                    {[
+                                        { label: "Psicología", icon: Brain, gradient: "from-blue-500 to-indigo-600" },
+                                        { label: "Tutorías", icon: GraduationCap, gradient: "from-emerald-500 to-teal-600" },
+                                        { label: "Nutrición", icon: Apple, gradient: "from-rose-500 to-orange-500" },
+                                        { label: "Reporte Global", icon: FileText, gradient: "from-violet-600 to-purple-700" },
+                                    ].map(r => (
+                                        <div key={r.label} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 text-center hover:shadow-xl transition-all flex flex-col h-full">
+                                            <div className={`w-16 h-16 bg-gradient-to-br ${r.gradient} rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg`}>
+                                                <r.icon className="w-8 h-8 text-white" />
+                                            </div>
+                                            <h4 className="text-slate-900 dark:text-white font-bold text-lg mb-2">{r.label}</h4>
+                                            <p className="text-slate-500 text-xs font-medium mb-6 flex-1">Datos consolidados, demografía y efectividad.</p>
+                                            <Btn onClick={() => generatePDFReport(r.label, allAppts, users)} variant="outline" className="w-full">
+                                                <Download className="w-4 h-4 mr-2" /> PDF Export
+                                            </Btn>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         </div>
                     )}
@@ -1567,6 +1894,139 @@ export function AdminDashboard() {
                             <Btn onClick={handleSaveResource} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20">Guardar Cambios</Btn>
                         </div>
                     </div>
+                </Modal>
+
+                {/* ─── Modal de Período (crear / editar / corte) ─── */}
+                <Modal
+                    open={showPeriodModal}
+                    onClose={() => setShowPeriodModal(false)}
+                    title={
+                        periodModalMode === "create" ? "Nuevo Período" :
+                        periodModalMode === "edit" ? "Editar Período" :
+                        "Realizar Corte de Datos"
+                    }
+                    subtitle={
+                        periodModalMode === "close"
+                            ? `Se cerrará: ${editingPeriod?.name}`
+                            : undefined
+                    }
+                    maxWidth="max-w-lg"
+                >
+                    {(periodModalMode === "create" || periodModalMode === "edit") && (
+                        <div className="space-y-5">
+                            <div>
+                                <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">
+                                    Nombre del período <span className="text-rose-500">*</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={periodName}
+                                    onChange={e => setPeriodName(e.target.value)}
+                                    placeholder="Ej. Semestre Feb–Jun 2025"
+                                    className={inputCls}
+                                />
+                            </div>
+                            <div>
+                                <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">
+                                    Rango de fechas <span className="text-rose-500">*</span>
+                                    {editingPeriod?.status === "cerrado" && (
+                                        <span className="ml-2 text-xs font-normal text-slate-400">(período cerrado — solo editable el nombre)</span>
+                                    )}
+                                </label>
+                                {editingPeriod?.status !== "cerrado" ? (
+                                    <div className="flex justify-center rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 p-3">
+                                        <Calendar
+                                            mode="range"
+                                            selected={periodDateRange}
+                                            onSelect={setPeriodDateRange}
+                                            numberOfMonths={2}
+                                        />
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-slate-400 italic px-1">
+                                        {editingPeriod.startDate} — {editingPeriod.endDate ?? "sin fecha fin"}
+                                    </p>
+                                )}
+                                {periodDateRange?.from && (
+                                    <p className="text-xs text-slate-500 mt-2 px-1">
+                                        Seleccionado: {periodDateRange.from.toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}
+                                        {periodDateRange.to && ` → ${periodDateRange.to.toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}`}
+                                    </p>
+                                )}
+                            </div>
+                            <div className="flex gap-3 pt-2">
+                                <Btn variant="ghost" onClick={() => setShowPeriodModal(false)} className="flex-1">Cancelar</Btn>
+                                <Btn onClick={handleSavePeriod} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20">
+                                    {periodModalMode === "create" ? "Crear Período" : "Guardar Cambios"}
+                                </Btn>
+                            </div>
+                        </div>
+                    )}
+
+                    {periodModalMode === "close" && (
+                        <div className="space-y-6">
+                            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 text-sm text-amber-800 dark:text-amber-300">
+                                <p className="font-semibold mb-1">¿Confirmar corte de datos?</p>
+                                <p>Las citas ya registradas en este período quedarán archivadas. No podrás asignarles otro período después.</p>
+                                <p className="mt-1 font-medium">{editingPeriod?._count?.appointments ?? 0} citas serán archivadas en este período.</p>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                                <input
+                                    type="checkbox"
+                                    id="create-next"
+                                    checked={createNextPeriod}
+                                    onChange={e => setCreateNextPeriod(e.target.checked)}
+                                    className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                                />
+                                <label htmlFor="create-next" className="text-sm font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
+                                    Crear el siguiente período ahora
+                                </label>
+                            </div>
+
+                            {createNextPeriod && (
+                                <div className="space-y-4 border-t border-slate-100 dark:border-slate-700 pt-4">
+                                    <p className="text-sm font-bold text-slate-700 dark:text-slate-200">Nuevo período</p>
+                                    <div>
+                                        <label className="block mb-2 text-slate-700 dark:text-slate-300 font-semibold text-sm">
+                                            Nombre <span className="text-rose-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={nextPeriodName}
+                                            onChange={e => setNextPeriodName(e.target.value)}
+                                            placeholder="Ej. Semestre Ago–Dic 2025"
+                                            className={inputCls}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block mb-2 text-slate-700 dark:text-slate-300 font-semibold text-sm">Rango de fechas</label>
+                                        <div className="flex justify-center rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 p-3">
+                                            <Calendar
+                                                mode="range"
+                                                selected={nextPeriodDateRange}
+                                                onSelect={setNextPeriodDateRange}
+                                                numberOfMonths={2}
+                                            />
+                                        </div>
+                                        {nextPeriodDateRange?.from && (
+                                            <p className="text-xs text-slate-500 mt-2 px-1">
+                                                Seleccionado: {nextPeriodDateRange.from.toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}
+                                                {nextPeriodDateRange.to && ` → ${nextPeriodDateRange.to.toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}`}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex gap-3">
+                                <Btn variant="ghost" onClick={() => setShowPeriodModal(false)} className="flex-1">Cancelar</Btn>
+                                <Btn onClick={handleClosePeriod} className="flex-1 bg-amber-500 hover:bg-amber-600 text-white border-0">
+                                    <Scissors className="w-4 h-4 mr-2" /> Confirmar Corte
+                                </Btn>
+                            </div>
+                        </div>
+                    )}
                 </Modal>
 
             </div>
