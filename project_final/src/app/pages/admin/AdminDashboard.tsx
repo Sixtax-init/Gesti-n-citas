@@ -769,9 +769,6 @@ export function AdminDashboard() {
     const apptTotalPages = Math.ceil(filteredAppts.length / APPT_PAGE_SIZE);
     const pagedAppts = filteredAppts.slice(apptPage * APPT_PAGE_SIZE, (apptPage + 1) * APPT_PAGE_SIZE);
 
-    const studentsTotalPages = Math.ceil(users.length / STUDENTS_PAGE_SIZE);
-    const pagedStudents = users.slice(studentsPage * STUDENTS_PAGE_SIZE, (studentsPage + 1) * STUDENTS_PAGE_SIZE);
-
     const handleAddSpec = async () => {
         if (!newName || !newEmail || !newPass) { toast.error("Nombre, correo y contraseña son obligatorios"); return; }
         await addSpecialist({ name: newName, department: newDept, email: newEmail, password: newPass, shift: newShift });
