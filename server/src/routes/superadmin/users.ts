@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { Prisma, UserRole } from '@prisma/client';
 import { prisma } from '../../db';
 import { SuperAdminRequest } from '../../middleware/verifySuperAdmin';
-import { writeAudit, getClientIp } from '../../services/auditLogger';
+import { writeAudit, requestContext } from '../../services/auditLogger';
 import { sendAccountInvitation } from '../../services/email';
 import { cancelOpenAppointments, notifyCancelledByDeactivation } from '../../services/deactivation';
 
@@ -118,7 +118,7 @@ router.post('/', async (req: SuperAdminRequest, res) => {
       targetId:       user.id,
       organizationId: organizationId ?? null,
       metadata:       { email, role, orgName },
-      ipAddress:      getClientIp(req),
+      ...requestContext(req),
     });
 
     res.status(201).json(user);
@@ -185,7 +185,7 @@ router.patch('/:id', async (req: SuperAdminRequest, res) => {
       targetId:       id,
       organizationId: target.organizationId,
       metadata:       { changedFields: Object.keys(data).filter(k => k !== 'password') },
-      ipAddress:      getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json(updated);
@@ -263,7 +263,7 @@ router.delete('/:id', async (req: SuperAdminRequest, res) => {
       targetId:       id,
       organizationId: target.organizationId,
       metadata:       { email: target.email, role: target.role, reason, cancelledAppointments: cancelled.length },
-      ipAddress:      getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json({ success: true, cancelledAppointments: cancelled.length });
@@ -304,7 +304,7 @@ router.post('/:id/restore', async (req: SuperAdminRequest, res) => {
       targetId:       id,
       organizationId: target.organizationId,
       metadata:       { email: target.email, role: target.role },
-      ipAddress:      getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json({ success: true });
@@ -369,7 +369,7 @@ router.post('/organizations/:orgId/admin', async (req: SuperAdminRequest, res) =
       targetId:       admin.id,
       organizationId: orgId,
       metadata:       { email, orgName: org.name },
-      ipAddress:      getClientIp(req),
+      ...requestContext(req),
     });
 
     res.status(201).json(admin);

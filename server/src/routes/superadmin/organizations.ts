@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import { SuperAdminRequest } from '../../middleware/verifySuperAdmin';
-import { writeAudit, getClientIp } from '../../services/auditLogger';
+import { writeAudit, requestContext } from '../../services/auditLogger';
 import {
   SEED_DEPARTMENTS,
   normalizeDepartmentName,
@@ -100,7 +100,7 @@ router.post('/', async (req: SuperAdminRequest, res) => {
       targetEntity: 'Organization',
       targetId: org.id,
       metadata: { name: org.name, slug: org.slug, type: org.type },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.status(201).json(org);
@@ -176,7 +176,7 @@ router.patch('/:id', async (req: SuperAdminRequest, res) => {
       targetId: id,
       organizationId: id,
       metadata: data,
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json(updated);
@@ -214,7 +214,7 @@ router.delete('/:id', async (req: SuperAdminRequest, res) => {
       targetId: id,
       organizationId: id,
       metadata: { name: org.name },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json({ success: true });
@@ -242,7 +242,7 @@ router.patch('/:id/logo', upload.single('logo'), async (req: SuperAdminRequest, 
       actorId: req.actor!.id, actorRole: 'superadmin',
       action: 'UPDATE_ORG_LOGO', targetEntity: 'Organization', targetId: id,
       organizationId: id, metadata: { logoUrl },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json(updated);
@@ -304,7 +304,7 @@ router.post('/:id/departments', async (req: SuperAdminRequest, res) => {
       actorId: req.actor!.id, actorRole: 'superadmin',
       action: 'CREATE_DEPARTMENT', targetEntity: 'OrgDepartment', targetId: department.id,
       organizationId, metadata: { name, requiresNote: department.requiresNote },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.status(201).json(department);
@@ -376,7 +376,7 @@ router.patch('/:id/departments/:deptId', async (req: SuperAdminRequest, res) => 
       actorId: req.actor!.id, actorRole: 'superadmin',
       action: 'UPDATE_DEPARTMENT', targetEntity: 'OrgDepartment', targetId: deptId,
       organizationId, metadata: data,
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json(updated);
@@ -415,7 +415,7 @@ router.delete('/:id/departments/:deptId', async (req: SuperAdminRequest, res) =>
       actorId: req.actor!.id, actorRole: 'superadmin',
       action: 'DELETE_DEPARTMENT', targetEntity: 'OrgDepartment', targetId: deptId,
       organizationId, metadata: { name: department.name },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json({ success: true });
@@ -493,7 +493,7 @@ router.post('/:id/fields', async (req: SuperAdminRequest, res) => {
       action: 'CREATE_REGISTRATION_FIELD',
       targetEntity: 'RegistrationField', targetId: field.id,
       organizationId, metadata: { key: field.key, label: field.label, type: field.type },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.status(201).json(field);
@@ -549,7 +549,7 @@ router.delete('/:id/fields/:fieldId', async (req: SuperAdminRequest, res) => {
       action: 'DELETE_REGISTRATION_FIELD',
       targetEntity: 'RegistrationField', targetId: fieldId,
       organizationId, metadata: { key: field.key, label: field.label },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json({ success: true });
