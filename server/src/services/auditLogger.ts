@@ -19,9 +19,26 @@ interface AuditEntry {
  * Para eventos de autenticación úsese `writeAuditNow`: ahí sí importa que la
  * entrada quede escrita, y son pocos.
  */
+/**
+ * Identidad del error, sin su contenido.
+ *
+ * NUNCA se registra el error completo de un fallo al escribir la bitácora: los
+ * errores de validación de Prisma incluyen en su mensaje los ARGUMENTOS de la
+ * consulta, y aquí esos argumentos son la propia entrada de auditoría. Para los
+ * eventos de cuenta eso significa el correo de una persona, así que un fallo de
+ * la bitácora acabaría volcando datos personales al log del servidor.
+ *
+ * El código (`P2002`) o el nombre de la clase basta para saber qué pasó; el
+ * detalle del registro perdido está en la propia petición que lo originó.
+ */
+function errorTag(err: unknown): string {
+  const e = err as { name?: string; code?: string };
+  return e?.code ?? e?.name ?? 'error desconocido';
+}
+
 export function writeAudit(entry: AuditEntry): void {
   prisma.auditLog.create({ data: entry }).catch(err => {
-    console.error('[AuditLog] Failed to write entry:', err);
+    console.error('[AuditLog] No se pudo guardar una entrada:', errorTag(err));
   });
 }
 
@@ -43,7 +60,12 @@ export async function writeAuditNow(entry: AuditEntry): Promise<void> {
   try {
     await prisma.auditLog.create({ data: entry });
   } catch (err) {
-    console.error('[AuditLog] Failed to write security entry:', entry.action, err);
+    // Tampoco se escribe `entry.action`. El analisis de seguridad lo marca como
+    // dato sensible por llamarse PASSWORD_RESET_*, y aunque solo sea el nombre
+    // del evento, la diferencia diagnostica es minima: un fallo al escribir la
+    // bitacora es casi siempre sistemico (base caida, esquema desfasado), no de
+    // un evento concreto, y para eso el codigo de error dice mas que el nombre.
+    console.error('[AuditLog] No se pudo guardar un evento de seguridad:', errorTag(err));
   }
 }
 
