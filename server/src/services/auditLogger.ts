@@ -138,5 +138,25 @@ export const LOGIN_FAILURE = {
   EMAIL_NOT_VERIFIED: 'email_not_verified',
 } as const;
 
+/**
+ * Acciones del superadmin que NO cambian nada: consultas.
+ *
+ * Se registran porque son la única forensia disponible si esa cuenta se ve
+ * comprometida. El superadmin puede leer los datos de todas las organizaciones,
+ * así que un atacante con su sesión no necesita modificar nada para hacer daño:
+ * le basta con mirar. Sin esto, ese paseo no deja rastro.
+ *
+ * Se registra QUÉ listado se consultó, con qué filtro y cuántas filas devolvió
+ * —no las filas en sí—: lo que interesa reconstruir es el alcance de lo que vio,
+ * y copiar los datos a la bitácora los duplicaría en otra tabla.
+ *
+ * Deliberadamente NO se audita la consulta de la propia bitácora: sería ruido
+ * que crece solo y entierra justo lo que se viene a buscar.
+ */
+export const SUPERADMIN_ACTION = {
+  USERS_VIEWED: 'SUPERADMIN_USERS_VIEWED',
+  ORGS_VIEWED: 'SUPERADMIN_ORGS_VIEWED',
+} as const;
+
 /** Actor de un evento cuyo autor no se pudo identificar (correo inexistente). */
 export const UNKNOWN_ACTOR = 'unknown';

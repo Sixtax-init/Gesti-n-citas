@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import { SuperAdminRequest } from '../../middleware/verifySuperAdmin';
-import { writeAudit, requestContext } from '../../services/auditLogger';
+import { writeAudit, requestContext, SUPERADMIN_ACTION } from '../../services/auditLogger';
 import {
   SEED_DEPARTMENTS,
   normalizeDepartmentName,
@@ -19,7 +19,7 @@ const VALID_FIELD_TYPES = ['text', 'number', 'select', 'date', 'radio'];
 const router = Router();
 
 // GET /api/superadmin/organizations
-router.get('/', async (_req: SuperAdminRequest, res) => {
+router.get('/', async (req: SuperAdminRequest, res) => {
   try {
     const orgs = await prisma.organization.findMany({
       orderBy: { createdAt: 'desc' },
@@ -27,6 +27,19 @@ router.get('/', async (_req: SuperAdminRequest, res) => {
         _count: { select: { users: true, specialists: true, appointments: true } },
       },
     });
+
+    // Mismo criterio que en el listado de usuarios: queda constancia de que se
+    // consultó el mapa completo de organizaciones de la plataforma.
+    writeAudit({
+      actorId:      req.actor!.id,
+      actorRole:    'superadmin',
+      action:       SUPERADMIN_ACTION.ORGS_VIEWED,
+      targetEntity: 'OrganizationList',
+      targetId:     'todas',
+      metadata:     { filas: orgs.length },
+      ...requestContext(req),
+    });
+
     res.json(orgs);
   } catch (error) {
     console.error('[superadmin] Error fetching organizations:', error);

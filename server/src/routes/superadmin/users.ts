@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { Prisma, UserRole } from '@prisma/client';
 import { prisma } from '../../db';
 import { SuperAdminRequest } from '../../middleware/verifySuperAdmin';
-import { writeAudit, requestContext } from '../../services/auditLogger';
+import { writeAudit, requestContext, SUPERADMIN_ACTION } from '../../services/auditLogger';
 import { sendAccountInvitation } from '../../services/email';
 import { cancelOpenAppointments, notifyCancelledByDeactivation } from '../../services/deactivation';
 
@@ -43,6 +43,24 @@ router.get('/', async (req: SuperAdminRequest, res) => {
       }),
       prisma.user.count({ where }),
     ]);
+
+    // Consultar usuarios de cualquier organización es la capacidad más sensible
+    // del superadmin y no dejaba ningún rastro. Se guarda el ALCANCE de lo que
+    // vio —filtro y número de filas—, no las filas: copiarlas aquí duplicaría los
+    // datos personales en otra tabla.
+    //
+    // Al vuelo (`writeAudit`) a propósito: es una consulta, no un evento de
+    // seguridad irrepetible, y un listado no debe tardar más por la bitácora.
+    writeAudit({
+      actorId:      req.actor!.id,
+      actorRole:    'superadmin',
+      action:       SUPERADMIN_ACTION.USERS_VIEWED,
+      targetEntity: 'UserList',
+      targetId:     orgId ?? 'todas',
+      organizationId: orgId ?? null,
+      metadata: { filtro: { orgId: orgId ?? null, role: role ?? null, page }, filas: users.length, total },
+      ...requestContext(req),
+    });
 
     res.json({ users, total, page, pageSize: PAGE_SIZE });
   } catch (error) {
