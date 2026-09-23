@@ -15,6 +15,7 @@ eventos— **no se repite aquí**.
 | **F** | Auditoría de accesos | Una fuerza bruta contra una cuenta **no dejaba ningún rastro** |
 | **G** | Bitácora consultable | No se podía responder *"¿qué pasó desde esta IP?"* desde la pantalla |
 | **H** | Tema del superadmin | La pestaña activa era casi invisible; el login no dejaba cambiar de tema |
+| **I** | Endurecimiento de acceso | Un enlace de recuperación podía servir para **otra cuenta**; las estadísticas de toda la organización las veía **cualquier alumno**; un especialista podía abrirse el expediente de un paciente que nunca atendió |
 
 > **Importante:** la base de datos **no se regenera**. Los cambios se aplican con
 > migraciones, que añaden columnas e índices **conservando los datos**. Recrear
@@ -45,7 +46,7 @@ cd server
 pnpm install
 pnpm exec prisma generate         # (1) OBLIGATORIO — ver nota
 pnpm exec prisma migrate deploy   # (2) OBLIGATORIO — aplica las migraciones nuevas
-pnpm db:seed                      # (3) SOLO si la base está vacía
+SEED_PASSWORD="ElijeUna" pnpm db:seed   # (3) SOLO si la base está vacía — ver nota
 pnpm dev                          # arranca en http://localhost:3000
 ```
 
@@ -83,6 +84,15 @@ Migraciones que introduce esta tanda:
 **(3)** El seed es **destructivo si ya hay datos** (hace `upsert` sobre la
 organización TECNL). Sobre una base con datos reales, sáltalo.
 
+> **El seed ya no trae contraseña propia.** Antes estaba escrita en
+> `prisma/seed.ts`, y ese archivo es público: cualquiera que leyera el
+> repositorio conocía las credenciales de toda base sembrada con él, incluida la
+> del superadmin, que alcanza los datos de **todas** las organizaciones. Ahora la
+> tomas de `SEED_PASSWORD` y el script se niega a arrancar sin ella. También se
+> niega a correr con `NODE_ENV=production`.
+>
+> Puedes ponerla en tu `.env` en vez de escribirla en cada comando.
+
 ### Variables de entorno nuevas
 
 Todas son opcionales y traen valores por defecto sanos. Están en
@@ -94,6 +104,7 @@ Todas son opcionales y traen valores por defecto sanos. Están en
 | `REMINDERS_INTERVAL_MINUTES` | `60` | Cada cuánto revisa si hay recordatorios pendientes |
 | `EMAIL_MIN_INTERVAL_MS` | `1100` | Separación mínima entre correos. Encaja con planes que permiten 1 por segundo |
 | `EMAIL_MAX_RETRIES` | `3` | Reintentos cuando el proveedor pide bajar el ritmo |
+| `SEED_PASSWORD` | **ninguno** | Contraseña de las cuentas de prueba. Sin ella `pnpm db:seed` no corre |
 
 > **Para el bloque B, pon `REMINDERS_INTERVAL_MINUTES=1`.** Con el valor por
 > defecto tendrías que esperar una hora entre comprobaciones.
@@ -127,7 +138,8 @@ el puerto **5173** y no hace falta configurar ninguna dirección.
 
 ### Cuentas del seed
 
-Todas con contraseña **`Admin1234`**:
+Todas con **la contraseña que hayas puesto en `SEED_PASSWORD`**. Ya no hay una
+fija: si sembraste con `SEED_PASSWORD="ElijeUna"`, esa es.
 
 | Rol | Correo | Dónde entra |
 |---|---|---|
@@ -140,7 +152,7 @@ Todas con contraseña **`Admin1234`**:
 
 ```bash
 cd server
-pnpm test          # 266 pruebas en 24 archivos
+pnpm test          # 308 pruebas en 27 archivos
 ```
 
 Crea y migra sola una base aparte con sufijo `_test`. **No toca la de
@@ -157,6 +169,8 @@ pnpm exec vitest run tests/available-days.test.ts          # 13  (bloque C)
 pnpm exec vitest run tests/email-queue.test.ts             # 7   (bloque E)
 pnpm exec vitest run tests/audit-auth.test.ts              # 16  (bloque F)
 pnpm exec vitest run tests/superadmin-audit.test.ts        # 14  (bloque G)
+pnpm exec vitest run tests/auth-input-types.test.ts        # 15  (bloque I)
+pnpm exec vitest run tests/authorization-boundaries.test.ts # 12 (bloque I)
 ```
 
 > **El frontend no tiene pruebas automatizadas.** Todo lo visual —los bloques D
@@ -246,7 +260,7 @@ que las lanza de verdad en paralelo):
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"alumno@mail.com","password":"Admin1234"}' | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+  -d '{"email":"alumno@mail.com","password":"LA_DE_SEED_PASSWORD"}' | grep -o '"token":"[^"]*' | cut -d'"' -f4)
 
 # Sustituye SPEC_ID y la fecha por un horario libre real
 for i in 1 2 3 4 5; do
@@ -676,7 +690,121 @@ claro.
 
 ---
 
-### Bloque I — Regresión 🟠
+### Bloque I — Endurecimiento de acceso 🔴 **(NUEVO)**
+
+> Salido de una auditoría de seguridad sobre `d91e2756`. Tres agujeros, y los
+> tres compartían la misma forma: **el servidor confiaba en algo que el cliente
+> controla**.
+>
+> La mayor parte de este bloque **ya está cubierta por pruebas automatizadas**, y
+> es donde de verdad se verifica: son casos que a mano no se reproducen bien.
+> Lo que se te pide mirar en pantalla es que **el camino normal siga funcionando**,
+> porque los tres arreglos añaden condiciones que podrían haberse pasado de
+> estrictas.
+
+#### I0 · La verificación principal es automatizada 📌 **Léelo antes de empezar**
+
+```bash
+cd server
+pnpm exec vitest run tests/auth-input-types.test.ts
+pnpm exec vitest run tests/authorization-boundaries.test.ts
+```
+
+**Resultado esperado:** 15 y 12 pruebas en verde. Entre ellas, las que afirman
+que un enlace de recuperación no sirve para otra cuenta, que el motivo escrito
+por un paciente no llega a otro, y que un especialista sin relación de atención
+sigue sin poder abrir un expediente.
+
+Los casos I1–I6 son lo que hay que comprobar **en la interfaz**.
+
+#### I1 · Recuperar la contraseña sigue funcionando 🔴
+
+1. Desde el login, pulsar *"Olvidé mi contraseña"* con un correo real.
+2. Abrir el enlace que llega a Mailtrap y poner una contraseña nueva.
+3. Entrar con ella.
+
+**Resultado esperado:** funciona de principio a fin. ⚠️ Es el caso más importante
+del bloque: el arreglo toca justo esta ruta, así que si algo se rompió, se rompió
+aquí. Comprobar también que **la sesión anterior se cerró**: si estabas dentro en
+otro navegador, esa sesión debe pedir credenciales otra vez.
+
+#### I2 · Un enlace ya usado o vencido no sirve 🟠
+
+1. Volver a abrir el **mismo** enlace de I1.
+
+**Resultado esperado:** dice que el enlace no es válido. Sin pantalla rota.
+
+2. Pedir otro enlace y esperar a que pase su plazo antes de usarlo.
+
+**Resultado esperado:** dice que expiró e invita a pedir uno nuevo.
+
+#### I3 · Activar una cuenta invitada sigue funcionando 🟠
+
+1. Como admin, dar de alta un **especialista** nuevo.
+2. Abrir el enlace de activación que le llega y fijar su contraseña.
+3. Entrar con esa cuenta.
+
+**Resultado esperado:** funciona. Usa el mismo mecanismo que I1, así que si aquel
+se rompió, este también.
+
+#### I4 · Las estadísticas son del administrador 🔴
+
+1. Entrar como **alumno** y recorrer su panel.
+2. Abrir las herramientas de desarrollo (F12) → **Red**, y filtrar por `stats`.
+
+**Resultado esperado:** el panel del alumno funciona con normalidad y **no
+aparece ninguna petición a `/api/stats`**. Antes la hacía en cada carga y cada
+cinco minutos, y el servidor le devolvía las estadísticas de toda la organización
+—incluido el texto libre que otros pacientes escribieron al agendar—.
+
+3. Repetir como **especialista**.
+
+**Resultado esperado:** lo mismo, ninguna petición a `/api/stats`.
+
+4. Entrar como **admin** y abrir sus estadísticas.
+
+**Resultado esperado:** se pintan completas, como siempre, y el **PDF del
+período** se descarga igual.
+
+#### I5 · El especialista agenda en su agenda y con sus pacientes 🔴
+
+**Precondición:** dos especialistas del mismo departamento y un paciente que solo
+ha tenido citas con el **primero**.
+
+1. Como **primer especialista**, agendar un **seguimiento** a ese paciente desde
+   su ficha.
+
+**Resultado esperado:** se crea y **nace confirmada**, como antes.
+
+2. Como **segundo especialista** (que nunca ha atendido a ese paciente), intentar
+   agendarle una cita.
+
+**Resultado esperado:** se rechaza con *"Solo puedes agendar seguimiento con
+pacientes que ya atiendes."* ⚠️ Antes se podía, y esa cita bastaba para abrirle
+el **expediente completo** del paciente, incluidas las notas que había escrito el
+primer especialista.
+
+3. Con ese mismo segundo especialista, intentar abrir el expediente del paciente.
+
+**Resultado esperado:** no puede.
+
+#### I6 · La primera cita la sigue pidiendo el paciente 🟠
+
+1. Como **alumno**, agendar una cita con un especialista con el que **nunca** ha
+   tenido ninguna.
+
+**Resultado esperado:** funciona con normalidad y queda **Pendiente**. ⚠️ Es el
+contrapeso de I5: la restricción es solo para el especialista, porque esa ruta
+existe para el seguimiento. Si al alumno le empezara a pedir una relación previa,
+nadie podría estrenar especialista y sería un fallo bloqueante.
+
+2. Como **admin**, agendar una cita en nombre de un alumno.
+
+**Resultado esperado:** también funciona.
+
+---
+
+### Bloque J — Regresión 🟠
 
 Recorrido completo, para confirmar que nada de lo anterior rompió el flujo:
 
@@ -716,6 +844,12 @@ Cosas que **no** cambian y no hace falta probar como nuevas:
   descuido. La tabla solo crece.
 - **El superadmin no puede leer notas clínicas**, y eso no cambió: el contenido
   del expediente está fuera de su alcance por diseño.
+- **El bloque I no agota la auditoría.** Se corrigieron cinco hallazgos; quedan
+  once abiertos, casi todos de despliegue (encabezados de seguridad, TLS, fijar
+  las dependencias al lockfile). No son de esta ronda de QA.
+- **Los arreglos del bloque I no cambian ninguna pantalla.** No hay interfaz
+  nueva que revisar: lo que se comprueba es que lo de siempre siga funcionando y
+  que el panel de alumno deje de pedir estadísticas.
 - Todo lo validado en rondas anteriores: departamentos por organización, notas
   obligatorias al cerrar, retención del expediente, bajas lógicas, reportes y
   estadísticas, sedes, eventos y plantillas de correo.
@@ -731,4 +865,5 @@ prueba automatizada que los cubra: lo que no se vea ahí, no se detecta.
 
 Marcar como **bloqueante** cualquier fallo marcado 🔴: son los que pueden
 implicar dos personas en la misma cita, un horario o una nota clínica perdidos,
-un acceso sin rastro o un recordatorio enviado en bucle.
+un acceso sin rastro, un recordatorio enviado en bucle, o —bloque I— que alguien
+entre a una cuenta o a un expediente que no le corresponde.
