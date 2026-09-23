@@ -8,6 +8,7 @@ import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email';
 import { upload } from '../middleware/upload';
 import { metadataValue, type LegacyField } from '../lib/registrationFields';
+import { mayRegisterInOrganization } from '../lib/registration';
 import {
   writeAuditNow, requestContext, auditText,
   AUTH_ACTION, LOGIN_FAILURE, UNKNOWN_ACTOR,
@@ -169,13 +170,32 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
     }
 
-    // Validate institutional email domain
-    const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN;
-    if (allowedDomain && data.email) {
-      const emailDomain = data.email.split('@')[1];
-      if (emailDomain !== allowedDomain) {
-        return res.status(400).json({ error: `Solo se permiten correos institucionales (@${allowedDomain})` });
-      }
+    // A qué organización entra, y si puede.
+    //
+    // La organización es OBLIGATORIA. Antes era opcional y omitirla dejaba la
+    // cuenta en el grupo sin inquilino, que no es un limbo: `orgScope` lo trata
+    // como un filtro concreto, así que esa cuenta veía las filas heredadas sin
+    // organización. Y mientras se pudiera omitir, cualquier regla de pertenencia
+    // se saltaba con no mandar el campo.
+    if (!data.organizationId || typeof data.organizationId !== 'string') {
+      return res.status(400).json({
+        code: 'ORGANIZATION_REQUIRED',
+        error: 'Elige tu organización para continuar.',
+      });
+    }
+
+    const org = await prisma.organization.findUnique({ where: { id: data.organizationId } });
+    if (!org || !org.active) {
+      return res.status(400).json({ error: 'Organización no válida o inactiva' });
+    }
+
+    // Quién pertenece lo decide la ORGANIZACIÓN, no una variable del proceso.
+    // Ver lib/registration.ts: con varias organizaciones en la misma instalación,
+    // un único ALLOWED_EMAIL_DOMAIN no podía expresar a la vez el dominio de la
+    // escuela y que el paciente de un hospital llega con el correo que tenga.
+    const permitido = mayRegisterInOrganization(org, data.email);
+    if (!permitido.ok) {
+      return res.status(permitido.status).json({ code: permitido.code, error: permitido.error });
     }
 
     // Check if user exists
@@ -192,16 +212,9 @@ router.post('/register', async (req, res) => {
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const verificationTokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    // Validar que la organización existe y determinar el rol según su tipo
-    let userRole: UserRole = UserRole.alumno;
-    if (data.organizationId) {
-      const org = await prisma.organization.findUnique({ where: { id: data.organizationId } });
-      if (!org || !org.active) {
-        return res.status(400).json({ error: 'Organización no válida o inactiva' });
-      }
-      // Escuelas → alumno  |  empresas y hospitales → usuario
-      userRole = org.type === 'school' ? UserRole.alumno : UserRole.usuario;
-    }
+    // Escuelas → alumno  |  empresas y hospitales → usuario
+    // (la organización ya se resolvió y validó arriba)
+    const userRole: UserRole = org.type === 'school' ? UserRole.alumno : UserRole.usuario;
 
     // Volcado a las columnas legacy.
     //
@@ -229,7 +242,7 @@ router.post('/register', async (req, res) => {
         password: hashedPassword,
         name: data.name,
         role: userRole,
-        organizationId: data.organizationId || null,
+        organizationId: org.id,
         metadata: data.metadata || null,
         // Campos legacy para compatibilidad con TECNL — se pueblan desde metadata
         matricula: legacyField("matricula", data.matricula),

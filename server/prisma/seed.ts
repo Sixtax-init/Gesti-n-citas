@@ -41,7 +41,7 @@ async function main() {
   // ── 1. Organization ──────────────────────────────────────────────────────────
   const org = await prisma.organization.upsert({
     where: { slug: 'tecnl' },
-    update: { userRoleLabel: 'Alumno' },
+    update: { userRoleLabel: 'Alumno', userRegistrationMode: 'domain', allowedEmailDomains: ['mail.com'] },
     create: {
       id: 'org-tecnl-001',
       name: 'TECNL',
@@ -50,6 +50,11 @@ async function main() {
       plan: 'free',
       active: true,
       userRoleLabel: 'Alumno',
+      // Es una escuela, así que el correo institucional identifica al alumnado.
+      // En desarrollo el "dominio institucional" es el de las cuentas sembradas,
+      // para que el registro se pueda probar sin configurar nada más.
+      userRegistrationMode: 'domain',
+      allowedEmailDomains: ['mail.com'],
     },
   });
 
