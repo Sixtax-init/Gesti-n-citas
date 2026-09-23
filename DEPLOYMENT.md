@@ -69,7 +69,9 @@ DATABASE_URL="file:/var/www/citas-tecnl/data/prod.db"
 JWT_SECRET="<el valor generado con node -e crypto>"
 
 # Dominio institucional permitido para registro de alumnos
-ALLOWED_EMAIL_DOMAIN="nuevoleon.tecnm.mx"
+# ALLOWED_EMAIL_DOMAIN se retiró en favor del modo de registro por
+# organización. TECNL se configura desde el panel del superadmin:
+# modo "domain" + dominio nuevoleon.tecnm.mx
 
 # URLs públicas del VPS
 BACKEND_URL="https://api.tudominio.mx"
@@ -446,7 +448,7 @@ chmod +x /usr/local/bin/backup-citas.sh
 
 ### Backend `.env`
 - [ ] `DATABASE_URL` apunta a `/var/www/citas-tecnl/data/prod.db` (SQLite) o PostgreSQL
-- [ ] `ALLOWED_EMAIL_DOMAIN` = `nuevoleon.tecnm.mx`
+- [ ] TECNL configurada en el panel del superadmin: modo de registro `domain` y dominio `nuevoleon.tecnm.mx`
 - [ ] `BACKEND_URL` = URL pública real (https)
 - [ ] `FRONTEND_URL` = URL pública real (https)
 - [ ] `UPLOADS_PATH` = `/var/www/citas-tecnl/uploads`

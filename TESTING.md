@@ -16,6 +16,7 @@ eventos— **no se repite aquí**.
 | **G** | Bitácora consultable | No se podía responder *"¿qué pasó desde esta IP?"* desde la pantalla |
 | **H** | Tema del superadmin | La pestaña activa era casi invisible; el login no dejaba cambiar de tema |
 | **I** | Endurecimiento de acceso | Un enlace de recuperación podía servir para **otra cuenta**; las estadísticas de toda la organización las veía **cualquier alumno**; un especialista podía abrirse el expediente de un paciente que nunca atendió |
+| **I bis** | Pertenencia por organización | `ALLOWED_EMAIL_DOMAIN` era **una sola variable para toda la plataforma**: o se ponía el dominio de la escuela y el hospital no podía registrar a nadie, o se dejaba vacía y cualquiera entraba a la organización que eligiera |
 
 > **Importante:** la base de datos **no se regenera**. Los cambios se aplican con
 > migraciones, que añaden columnas e índices **conservando los datos**. Recrear
@@ -65,6 +66,7 @@ Migraciones que introduce esta tanda:
 | `20260906000000_appointment_slot_unique` | Índice **único parcial** sobre `(specialistId, date, time)`. Impide dos citas vivas del mismo especialista a la misma hora. Es **parcial**: excluye las canceladas, para que cancelar libere el horario |
 | `20260906010000_appointment_reminder_sent` | Columna `Appointment.reminderSentAt` + su índice. Es el candado que evita que un recordatorio se envíe dos veces |
 | `20260910000000_audit_auth_events` | Columna `AuditLog.userAgent` + tres índices (por acción, por fecha, por IP). Son los que hacen consultable la bitácora del bloque G |
+| `20260923000000_org_registration_mode` | Columnas `Organization.userRegistrationMode` y `allowedEmailDomains`. Sustituyen a `ALLOWED_EMAIL_DOMAIN`. **Las organizaciones que ya existen quedan en modo `open`**, que es lo que hacían hasta ahora, así que nada cambia al migrar |
 
 **No borran nada** y son puramente aditivas: dos columnas nullable e índices.
 
@@ -105,6 +107,13 @@ Todas son opcionales y traen valores por defecto sanos. Están en
 | `EMAIL_MIN_INTERVAL_MS` | `1100` | Separación mínima entre correos. Encaja con planes que permiten 1 por segundo |
 | `EMAIL_MAX_RETRIES` | `3` | Reintentos cuando el proveedor pide bajar el ritmo |
 | `SEED_PASSWORD` | **ninguno** | Contraseña de las cuentas de prueba. Sin ella `pnpm db:seed` no corre |
+
+> **`ALLOWED_EMAIL_DOMAIN` desapareció.** Quién puede registrarse lo decide
+> ahora cada organización desde el panel del superadmin, con un modo
+> (`open` / `domain` / `invitation`) y su lista de dominios. Si la tienes en tu
+> `.env`, bórrala: ya no la lee nadie. El seed deja TECNL en modo `domain` con
+> el dominio `mail.com`, que es el de las cuentas sembradas, para que el
+> registro se pueda probar sin configurar nada.
 
 > **Para el bloque B, pon `REMINDERS_INTERVAL_MINUTES=1`.** Con el valor por
 > defecto tendrías que esperar una hora entre comprobaciones.
@@ -152,7 +161,7 @@ fija: si sembraste con `SEED_PASSWORD="ElijeUna"`, esa es.
 
 ```bash
 cd server
-pnpm test          # 308 pruebas en 27 archivos
+pnpm test          # 328 pruebas en 28 archivos
 ```
 
 Crea y migra sola una base aparte con sufijo `_test`. **No toca la de
@@ -171,6 +180,7 @@ pnpm exec vitest run tests/audit-auth.test.ts              # 16  (bloque F)
 pnpm exec vitest run tests/superadmin-audit.test.ts        # 14  (bloque G)
 pnpm exec vitest run tests/auth-input-types.test.ts        # 15  (bloque I)
 pnpm exec vitest run tests/authorization-boundaries.test.ts # 12 (bloque I)
+pnpm exec vitest run tests/org-registration-mode.test.ts   # 20  (bloque I bis)
 ```
 
 > **El frontend no tiene pruebas automatizadas.** Todo lo visual —los bloques D
@@ -801,6 +811,104 @@ nadie podría estrenar especialista y sería un fallo bloqueante.
 2. Como **admin**, agendar una cita en nombre de un alumno.
 
 **Resultado esperado:** también funciona.
+
+---
+
+### Bloque I bis — Pertenencia por organización 🔴 **(NUEVO)**
+
+> `ALLOWED_EMAIL_DOMAIN` era **una sola variable del proceso** para toda la
+> plataforma, y no hay valor correcto cuando conviven varias organizaciones: con
+> el dominio de la escuela el hospital no puede registrar a nadie, y vacía
+> cualquiera entra a la organización que elija del selector público.
+>
+> Detrás hay un hecho del negocio: dentro de una misma organización el personal
+> tiene correo institucional, pero los usuarios finales no siempre. Un paciente
+> llega con el correo que tenga. Por eso ahora cada organización declara **cómo**
+> entra a su gente, no solo con qué dominio.
+>
+> | Modo | Quién puede registrarse | Para quién |
+> |---|---|---|
+> | `open` | Cualquiera, con el correo que tenga | Hospital que acepta pacientes |
+> | `domain` | Solo correos de los dominios configurados | Escuela |
+> | `invitation` | Nadie: el admin da de alta | Clínica cerrada, empresa |
+>
+> Se configura en `/superadmin` → Organizaciones → editar.
+
+#### Ibis0 · Qué cambia en tu entorno 📌
+
+Después de migrar, **las organizaciones que ya tenías quedan en modo `open`**:
+es exactamente lo que hacían antes, así que tu flujo de siempre sigue igual. El
+modo por giro solo aplica a las organizaciones que crees de ahora en adelante.
+
+#### Ibis1 · Una organización nueva nace con el modo de su giro 🟠
+
+1. En `/superadmin` → Organizaciones, crear una de tipo **Escuela**, otra de
+   **Hospital** y otra de **Empresa**.
+2. Abrir el editor de cada una y mirar *"Quién puede registrarse"*.
+
+**Resultado esperado:** escuela en **solo dominios**, hospital en **cualquiera**,
+empresa en **nadie**. La escuela además nace **sin dominios**, así que aparece el
+aviso en ámbar de que nadie podrá registrarse hasta configurarlos.
+
+#### Ibis2 · Modo dominios 🔴
+
+1. Editar la escuela de Ibis1 y poner en dominios `mail.com`. Guardar.
+2. Cerrar sesión, ir al registro y elegir esa organización.
+
+**Resultado esperado:** el aviso de la organización dice **"usa tu correo
+@mail.com"**, antes de llenar nada.
+
+3. Intentar registrarse con un correo **de otro dominio**.
+
+**Resultado esperado:** se rechaza explicando qué dominio hace falta. ⚠️ La
+cuenta **no se crea**: confirma en el panel de usuarios que no aparece.
+
+4. Registrarse con un correo **@mail.com**.
+
+**Resultado esperado:** funciona con normalidad.
+
+#### Ibis3 · Modo por invitación 🟠
+
+1. Elegir en el registro la organización de tipo **Empresa** de Ibis1.
+
+**Resultado esperado:** sale un aviso en ámbar de que esa organización **no
+acepta registro público** y el botón de registrarse queda **deshabilitado**. Se
+dice antes de llenar el formulario, no al enviarlo.
+
+2. Como admin de esa organización, dar de alta a un **especialista**.
+
+**Resultado esperado:** funciona. ⚠️ Es el contrapeso: el modo solo gobierna el
+autorregistro de usuarios finales. El alta de personal la hace un admin que ya
+decidió a quién contrata, y esa vía no se toca.
+
+#### Ibis4 · El personal respeta los dominios si los hay 🟡
+
+1. En la escuela de Ibis2, que tiene `mail.com`, dar de alta un especialista con
+   un correo **de otro dominio**.
+
+**Resultado esperado:** se rechaza indicando el dominio correcto.
+
+2. Repetir en el hospital, que **no** tiene dominios configurados.
+
+**Resultado esperado:** acepta cualquier correo. Sin dominios declarados no hay
+nada que comprobar.
+
+#### Ibis5 · Ya no se puede entrar sin organización 🔴
+
+1. En el registro, intentar enviar **sin elegir organización**.
+
+**Resultado esperado:** no deja. ⚠️ Antes se podía llamar directo a la API sin el
+campo y la cuenta caía en un grupo compartido sin organización, que no es un
+limbo: esa cuenta veía las filas heredadas que no tienen organización asignada.
+
+#### Ibis6 · Regresión del registro 🔴
+
+1. Registrar un usuario nuevo en TECNL con un correo `@mail.com`, verificar el
+   correo y entrar.
+
+**Resultado esperado:** todo el flujo funciona igual que siempre. El seed deja
+TECNL en modo `domain` con `mail.com` justo para que esto se pueda probar sin
+configurar nada.
 
 ---
 
