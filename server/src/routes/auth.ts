@@ -64,6 +64,18 @@ router.post('/login', async (req, res) => {
       ...ctx,
     });
 
+    // El TIPO se valida antes de tocar la base y antes de bcrypt.
+    //
+    // Con una contraseña que no es cadena, `bcrypt.compare` lanza y el catch de
+    // abajo responde 500, mientras que un correo inexistente responde 401. Esa
+    // diferencia delata que la cuenta existe, que es justo lo que el mensaje
+    // genérico trata de ocultar. Un correo que no es cadena rompe igual dentro
+    // de Prisma.
+    if (typeof email !== 'string' || typeof password !== 'string') {
+      await auditFailure(LOGIN_FAILURE.MALFORMED_CREDENTIALS);
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
     // Find user
     const user = await prisma.user.findUnique({
       where: { email },
@@ -300,6 +312,13 @@ router.get('/verify/:token', async (req, res) => {
 router.post('/resend-verification', async (req, res) => {
   try {
     const { email } = req.body;
+
+    // `req.body` es `any`: un valor que no es cadena llega hasta el `where` de
+    // Prisma. Se responde lo mismo que en el caso bueno para no distinguirlo.
+    if (typeof email !== 'string') {
+      return res.json({ message: 'Si el correo existe y no está verificado, recibirás un nuevo enlace.' });
+    }
+
     const user = await prisma.user.findUnique({ where: { email } });
 
     // Always respond OK to avoid leaking which emails exist
@@ -330,6 +349,13 @@ router.post('/resend-verification', async (req, res) => {
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
+
+    // Mismo criterio que el resto del archivo: el tipo se valida antes de que el
+    // valor llegue al `where`, y la respuesta no distingue este caso.
+    if (typeof email !== 'string') {
+      return res.json({ message: 'Si el correo existe, recibirás un enlace para restablecer tu contraseña.' });
+    }
+
     const user = await prisma.user.findUnique({ where: { email } });
 
     // Always respond OK to avoid leaking which emails exist
@@ -386,12 +412,24 @@ router.post('/reset-password', async (req, res) => {
   try {
     const { token, password } = req.body;
 
-    if (!token || !password || password.length < 6) {
+    // `typeof`, no solo truthiness.
+    //
+    // `req.body` es `any`, así que un objeto JSON llegaba intacto hasta el
+    // `where` y Prisma lo interpretaba como FILTRO sobre la columna
+    // (`{ not: null }`, `{ startsWith: … }`) en vez de como el token. Con eso,
+    // una petición sin autenticar podía seleccionar la cuenta de otra persona
+    // sin haber recibido nunca su enlace, y el handler le escribía la contraseña.
+    // Que un objeto en esa posición es un filtro se ve en el propio proyecto:
+    // stats.ts filtra `User.id` (String) con `{ in: … }`.
+    if (typeof token !== 'string' || typeof password !== 'string' || password.length < 6) {
       return res.status(400).json({ error: 'Token y contraseña (mínimo 6 caracteres) son requeridos' });
     }
 
     const user = await prisma.user.findFirst({
-      where: { resetPasswordToken: token }
+      // `equals` explícito: la forma del operando la fija el servidor, no quien
+      // llama. Aunque mañana alguien quite el `typeof` de arriba, un objeto ya
+      // no puede redefinir la comparación.
+      where: { resetPasswordToken: { equals: token } }
     });
 
     // Una cuenta dada de baja no puede reactivarse a sí misma por el enlace de
@@ -423,6 +461,14 @@ router.post('/reset-password', async (req, res) => {
         metadata:     { email: user.email, reason: 'expired_token' },
         ...requestContext(req),
       });
+      // Se limpia el token vencido. Antes se devolvía sin borrarlo, así que los
+      // tokens viejos se quedaban en la columna indefinidamente: cada uno es una
+      // fila más que cualquier consulta futura sobre esa columna puede emparejar.
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { resetPasswordToken: null, resetPasswordTokenExpiresAt: null },
+      });
+
       return res.status(400).json({ code: 'EXPIRED_TOKEN', error: 'El enlace ha expirado. Solicita uno nuevo.' });
     }
 
@@ -479,7 +525,7 @@ router.post('/change-password', verifyToken as any, async (req: AuthRequest, res
   try {
     const { currentPassword, newPassword } = req.body;
 
-    if (!currentPassword || !newPassword || newPassword.length < 6) {
+    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || newPassword.length < 6) {
       return res.status(400).json({ error: 'Contraseña actual y nueva contraseña (mínimo 6 caracteres) son requeridas' });
     }
 
