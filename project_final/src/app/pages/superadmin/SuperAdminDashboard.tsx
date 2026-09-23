@@ -19,6 +19,9 @@ interface Org {
     plan: string;
     active: boolean;
     userRoleLabel: string;
+    // Cómo entran los usuarios finales: "open" | "domain" | "invitation"
+    userRegistrationMode: string;
+    allowedEmailDomains: string[];
     departments: string[];
     logoUrl?: string | null;
     createdAt: string;
@@ -187,7 +190,10 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
 
     // ── Editar org modal ──
     const [editOrg, setEditOrg]     = useState<Org | null>(null);
-    const [editForm, setEditForm]   = useState({ name: "", type: "school", plan: "free", userRoleLabel: "Usuario" });
+    const [editForm, setEditForm]   = useState({
+        name: "", type: "school", plan: "free", userRoleLabel: "Usuario",
+        userRegistrationMode: "open", allowedEmailDomains: "",
+    });
     const [logoFile, setLogoFile]   = useState<File | null>(null);
     const [logoUploading, setLogoUploading] = useState(false);
     const logoInputRef = useRef<HTMLInputElement>(null);
@@ -366,7 +372,17 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                 headers: superAdminHeaders(),
                 // Sin `departments`: contratar y retirar se hace en el gestor del
                 // catálogo, que además valida que el nombre exista en él.
-                body: JSON.stringify({ name: editForm.name.trim(), type: editForm.type, plan: editForm.plan, userRoleLabel: editForm.userRoleLabel }),
+                body: JSON.stringify({
+                    name: editForm.name.trim(),
+                    type: editForm.type,
+                    plan: editForm.plan,
+                    userRoleLabel: editForm.userRoleLabel,
+                    userRegistrationMode: editForm.userRegistrationMode,
+                    // Se escriben separados por coma y el servidor los normaliza
+                    // (minúsculas, sin arroba, sin repetidos).
+                    allowedEmailDomains: editForm.allowedEmailDomains
+                        .split(",").map(d => d.trim()).filter(Boolean),
+                }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
@@ -977,7 +993,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                                             renglón, separado del grupo al que pertenece. */}
                                                         <div className="flex gap-2">
                                                             <button
-                                                                onClick={() => { setEditOrg(org); setEditForm({ name: org.name, type: org.type, plan: org.plan, userRoleLabel: org.userRoleLabel ?? "Usuario" }); setLogoFile(null); }}
+                                                                onClick={() => { setEditOrg(org); setEditForm({ name: org.name, type: org.type, plan: org.plan, userRoleLabel: org.userRoleLabel ?? "Usuario", userRegistrationMode: org.userRegistrationMode ?? "open", allowedEmailDomains: (org.allowedEmailDomains ?? []).join(", ") }); setLogoFile(null); }}
                                                                 className="p-1.5 rounded-lg text-muted-foreground hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
                                                                 title="Editar"
                                                             >
@@ -1649,6 +1665,38 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                     <div className="space-y-4">
                         <Field label="Nombre" value={editForm.name} onChange={v => setEditForm(f => ({ ...f, name: v }))} placeholder="TECNL" />
                         <Field label="Cómo se llaman los usuarios" value={editForm.userRoleLabel} onChange={v => setEditForm(f => ({ ...f, userRoleLabel: v }))} placeholder="Alumno / Paciente / Empleado" />
+
+                        {/* Quién puede autorregistrarse. No es lo mismo una escuela,
+                            donde el correo institucional identifica al alumnado, que un
+                            hospital, donde el paciente llega con el correo que tenga. */}
+                        <div>
+                            <label className="block mb-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Quién puede registrarse</label>
+                            <select
+                                value={editForm.userRegistrationMode}
+                                onChange={e => setEditForm(f => ({ ...f, userRegistrationMode: e.target.value }))}
+                                className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-indigo-500"
+                            >
+                                <option value="open">Cualquiera — con el correo que tenga</option>
+                                <option value="domain">Solo con un correo de los dominios de abajo</option>
+                                <option value="invitation">Nadie — solo el admin da de alta</option>
+                            </select>
+                        </div>
+
+                        {editForm.userRegistrationMode === "domain" && (
+                            <div>
+                                <Field
+                                    label="Dominios de correo aceptados"
+                                    value={editForm.allowedEmailDomains}
+                                    onChange={v => setEditForm(f => ({ ...f, allowedEmailDomains: v }))}
+                                    placeholder="nuevoleon.tecnm.mx, alumnos.tecnm.mx"
+                                />
+                                <p className={`mt-1.5 text-xs ${editForm.allowedEmailDomains.trim() ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400"}`}>
+                                    {editForm.allowedEmailDomains.trim()
+                                        ? "Separados por coma. Se guardan en minúsculas y sin la arroba."
+                                        : "Sin dominios, nadie podrá registrarse en esta organización."}
+                                </p>
+                            </div>
+                        )}
 
                         {/* Los departamentos dejaron de ser tres casillas fijas: cada
                             organización tiene su catálogo, y se gestiona en su propia
