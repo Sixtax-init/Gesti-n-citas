@@ -403,8 +403,13 @@ cd /var/www/citas-tecnl/server
 # Borrar migraciones viejas de SQLite
 rm -rf prisma/migrations
 
-# Crear nueva migración para PostgreSQL
-npx prisma migrate dev --name initial
+# Aplicar las migraciones.
+#
+# NUNCA `prisma migrate dev` en un servidor: ese comando ejecuta el hook
+# `prisma.seed` de server/package.json, que siembra cuentas de prueba —incluida
+# una de superadmin con alcance a todas las organizaciones— sin avisar.
+# `migrate deploy` aplica las mismas migraciones y no dispara el hook.
+npx prisma migrate deploy
 
 # Regenerar cliente Prisma
 npx prisma generate
